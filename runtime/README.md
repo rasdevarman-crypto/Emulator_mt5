@@ -45,3 +45,8 @@ The provenance script requires `jq`, `sha256sum`, real HTTPS source URLs, non-pl
 - Wine source/version selected: official WineHQ 11.0 stable with new WoW64 configure mode `--enable-archs=i386,x86_64`; the build and full dependency closure are not yet verified.
 - Rootfs release remains unpinned until the runtime dependency closure can be verified.
 - GitHub Actions checks shell syntax, the example manifest JSON, and that an absent bundle or placeholder metadata is rejected. The separate `Runtime Source Acquisition Audit` workflow acquires pinned source inputs only; it does not build or run Wine/MT5.
+
+
+## Experimental build pipeline
+
+See [the runtime build pipeline guide](../docs/RUNTIME_BUILD_PIPELINE.md) and workflow [runtime-build.yml](../.github/workflows/runtime-build.yml). The pipeline builds separate Box64 ARM64 and Wine x86_64 install-tree artifacts with logs and SHA-256 checksums. These are experimental build outputs only, not a ready-to-run Android runtime bundle; rootfs dependency closure and physical-device tests remain required.
