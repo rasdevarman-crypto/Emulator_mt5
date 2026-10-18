@@ -6,7 +6,7 @@ This matrix is for the first ARM64 Android proof of concept. It is a build/test 
 
 - Host ABI: Android arm64-v8a.
 - Linux userland: pinned glibc rootfs; do not assume Android Bionic can load desktop Linux builds.
-- Translator: Box64 source candidate v0.4.4 from https://github.com/ptitSeb/box64/releases/tag/v0.4.4. Resolve the full commit SHA before building.
+- Translator: Box64 source candidate v0.4.4, pinned to commit `2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a`, from https://github.com/ptitSeb/box64/releases/tag/v0.4.4.
 - Windows compatibility layer: **official WineHQ 11.0 stable** source archive at https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz.
 - Wine configuration: **new WoW64 mode** via `./configure --enable-archs=i386,x86_64`. This requests both i386 and x86_64 PE architectures and is distinct from `--enable-win64`. Wine 11.0 declares the new WoW64 mode fully supported. Pure 32-bit `WINEARCH=win32` prefixes are not supported in this mode; start with a fresh default 64-bit prefix.
 - Process/filesystem isolation: PRoot-compatible launcher and explicit paths/environment.
@@ -16,7 +16,7 @@ This matrix is for the first ARM64 Android proof of concept. It is a build/test 
 
 1. Build environment must provide the host C/C++ toolchain, Wine build dependencies, and MinGW-compatible PE toolchains for both i386 and x86_64.
 2. Capture the full Wine configure output. Fail the build if `--enable-archs=i386,x86_64` cannot configure both architectures; do not silently fall back to a Win64-only build.
-3. Record the exact source archive SHA-256 and, if published, verify the upstream checksum/signature. Record Box64's full commit SHA rather than only its release tag/short hash.
+3. Record the exact Wine source archive SHA-256 and, if published, verify the upstream checksum/signature. Box64 is pinned to full commit `2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a`.
 4. Resolve the Wine Unix binary's full shared-library dependency closure inside the selected pinned glibc rootfs. Include runtime-loaded libraries and required data files, not just DT_NEEDED.
 5. Do not assume the result of an x86_64 Linux build runs on Android just because Box64 is present. Validate process execution and filesystem paths within the rootfs.
 
@@ -32,9 +32,14 @@ This matrix is for the first ARM64 Android proof of concept. It is a build/test 
 
 ## Acceptance status
 
-- Box64 version candidate identified: v0.4.4 (source only); full commit SHA not yet recorded.
+- Box64 version candidate identified: v0.4.4 at commit `2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a` (source only).
 - Wine source/version selected: official WineHQ 11.0 stable; source archive/build not yet acquired or verified.
 - Wine WoW64 configuration selected: `--enable-archs=i386,x86_64`; build not yet executed.
 - Rootfs version: pending pinned image/package selection.
 - Binary checksums: unavailable until actual artifacts are acquired/built.
 - Android execution and MT5: not tested.
+
+
+## Source acquisition automation
+
+`scripts/acquire-runtime-sources.sh` acquires the exact Box64 commit and official WineHQ 11.0 archive, verifies the Wine source version, and writes a source audit containing the downloaded Wine archive hash. `.github/workflows/runtime-source-audit.yml` automates that source-only check and uploads the sources/audit for seven days. No executable runtime is produced by this job.
