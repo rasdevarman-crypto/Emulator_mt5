@@ -1,34 +1,46 @@
 # Runtime source selection and acquisition strategy
 
-## Decision for the first proof of concept
+## Selected proof-of-concept architecture
 
-Use upstream projects as source references, not a prebuilt Winlator APK as a drop-in runtime. Winlator demonstrates that an Android app can combine Wine with Box64, but its runtime is an integrated stack (root filesystem, Wine build, graphics drivers, translation layers and app-side orchestration). Copying only `box64` and `wine` from an arbitrary APK would not produce a reproducible or necessarily compatible bundle.
+**Target host:** Android ARM64 (arm64-v8a), with a glibc userland/rootfs (Ubuntu/Debian-style) isolated through a documented PRoot-compatible approach. Do not execute arbitrary Linux/glibc binaries directly in Android's Bionic app process.
 
-Reference projects:
-- Box64 upstream: https://github.com/ptitSeb/box64
-- Box64 Wine notes: https://github.com/ptitSeb/box64/blob/main/docs/WINE.md
-- Winlator WB64 (architecture/integration reference): https://github.com/winebox64/winlator
-- Wine upstream: https://gitlab.winehq.org/wine/wine
+**Windows x64 translation path:** AArch64 Box64 + x86_64 Wine (prefer a WoW64 build for 32-bit Windows components) + glibc rootfs. This is the first experiment because Box64's own Wine guide describes x86_64 Wine running under Box64. It is not an ARM64 Wine binary: ARM64 describes the Android host, while the x86_64 Wine process is translated. Box64's docs separately note that native Arm64 Wine/WoW64 has additional cpu.dll/Arm64EC requirements and recommend Hangover for Arm64 Wine. See the upstream Wine notes before changing architecture.
 
-These links identify upstreams, not a selected release or a verified binary. Before pinning a release, inspect its license, source revision, release assets, target ABI, build configuration and dependency closure. Record immutable commit/tag identifiers and SHA-256 digests; do not use a moving `main`/ `master` reference in a release manifest.
+## Source/version pins for the first experiment
 
-## Why the first target is ARM64
+- **Box64 source candidate:** upstream tag v0.4.4, release page: https://github.com/ptitSeb/box64/releases/tag/v0.4.4. The upstream release page identifies the release commit prefix as 2f130fa. Resolve and record the full commit SHA during acquisition; do not use the short SHA as a manifest pin.
+- **Wine source:** https://gitlab.winehq.org/wine/wine. No Wine version is approved yet. Select a current stable WineHQ tag only after checking that its x86_64 WoW64 configuration builds cleanly in the chosen glibc rootfs and passes smoke tests. Do not silently substitute a community repack or a different Wine build.
+- **Integration reference only:** https://github.com/winebox64/winlator and https://github.com/winebox64/winlator-wb64. These demonstrate the combined Android stack (Wine, Box64, rootfs/PRoot, graphics components); they are not a source of unreviewed binary files to copy into this app.
 
-The current Android app targets Android and must not assume that a Linux desktop Box64 build runs directly in Android's Bionic userspace. Box64 and Wine must be built/configured for the actual Android execution environment, or run inside a documented compatible userspace/rootfs. The runtime must include all required shared libraries and a process-launch strategy. A matching ELF machine value alone is insufficient.
+A source tag is not a runnable Android artifact. Build provenance, complete dependency closure, license notices and SHA-256 values must be recorded from the actual produced artifacts.
 
-## Staged acquisition and proof gates
+## Dependency and compatibility inventory
 
-1. **Source review:** pin exact Box64 and Wine revisions; record licenses/notices and any patches. Do not download opaque binaries until provenance is documented.
-2. **Build environment:** choose one reproducible ARM64 build approach and document toolchain, libc/userspace, configure flags, patches and dependency versions. Keep proprietary MT5 installer files and credentials out of CI.
-3. **Bundle assembly:** stage the actual executables and complete rootfs/dependencies under `runtime/bundle/`; generate `manifest.json` from verified artifacts. Never copy placeholder values from `runtime-manifest.example.json`.
-4. **Provenance preflight:** run `bash scripts/check-runtime-bundle.sh runtime/bundle` and `bash scripts/verify-runtime-provenance.sh runtime/bundle`. These are static checks only.
-5. **Execution proof:** on a compatible ARM64 Android device/emulator, capture `box64 --version`, `wine --version`, Wine prefix initialization, process exit codes and logs. Keep this separate from APK compile success.
-6. **MT5 proof:** only after the Wine smoke test passes, test the official desktop installer/terminal without trading credentials. Record app version, device SoC/GPU, Android version, graphics backend, install/launch outcome and logs. Do not enable the launch button until this is repeatable.
+| Component | Requirement for the first PoC | Verification |
+|---|---|---|
+| Android host | ARM64 device, supported Android version, sufficient storage/RAM | Device ABI, Android version, kernel/page-size details |
+| Box64 | AArch64 build for the selected glibc rootfs; Wine support configured as needed | file, readelf -h, box64 --version; inspect linked libraries |
+| Wine | x86_64 WoW64 build, running inside the same glibc rootfs | file, wine --version, ldd inside rootfs, prefix initialization |
+| Rootfs/libc | One pinned glibc distribution and its runtime libraries | Record release, package inventory and checksums; no host-Bionic assumptions |
+| x86_64 runtime libraries | Wine-required x86_64 libraries, including C/C++ runtime/unwind libraries as required by the chosen build | Resolve every DT_NEEDED dependency inside rootfs; no unresolved libraries |
+| Graphics/display | Start with the simplest documented X11/Vulkan path available for the device; GPU drivers are optional only if the selected path can run without them | Log graphics backend and run a basic Wine GUI smoke test |
+| Audio/input | Add only after process launch succeeds; host integration is separate work | Manual touch/mouse/keyboard and audio checks |
+| MT5 | Official desktop installer, separate from runtime artifacts | Install and launch only after Wine smoke test; no trading credentials |
 
-## Explicit non-goals / limitations
+## Reproducible acquisition steps
 
-- No runtime binaries are bundled by this document.
-- No version or artifact is yet approved by this source review.
-- Static manifest/hash checks do not establish that a binary is safe, correctly built, executable on Android, or compatible with MT5.
-- Desktop MT5 support is a hypothesis to test, not a guarantee; graphics, input, network, 32-bit/64-bit components, Windows APIs and Android lifecycle can block it.
-- Do not commit large runtime binaries to Git. Store reviewed build artifacts in release assets or a controlled artifact store with hashes and license notices.
+1. Fetch Box64 from its upstream Git repository at tag v0.4.4, resolve the full commit SHA, inspect its license and build docs, and build for the chosen glibc rootfs. The upstream compile guide has separate ARM64 and Termux paths; do not assume the native Termux build runs glibc Linux binaries.
+2. Choose and record a stable WineHQ source tag after checking the WoW64 build mode and dependency list. Save full commit SHA, build flags, toolchain versions and package manifest.
+3. Build/package in a pinned rootfs/container. Capture package list, build logs, license notices and SHA-256 for all artifacts.
+4. Stage the real Box64 executable at runtime/bundle/bin/box64, the Wine launcher at runtime/bundle/bin/wine, and the rootfs at runtime/bundle/rootfs/. Keep the manifest's source URLs and hashes tied to the actual produced files.
+5. Run bash scripts/check-runtime-bundle.sh runtime/bundle and bash scripts/verify-runtime-provenance.sh runtime/bundle. These are static preflights, not execution tests.
+6. On a real ARM64 Android device, test Box64, Wine version output, prefix initialization, GUI/display, input and process shutdown. Then test MT5 installer/terminal. Keep device logs and test matrix; do not enable the app's launch button until the test is repeatable.
+
+## Explicit limitations
+
+- The repository currently contains no runnable Wine/Box64 binaries or rootfs. No runtime bundle is being claimed as built by this commit.
+- Box64 v0.4.4 is a source candidate, not a verified Android binary.
+- Wine is deliberately not pinned until a current official stable source tag and WoW64 build have been verified. A fabricated or stale version pin would reduce reliability.
+- Passing JSON/hash/ELF checks does not establish source authenticity, malware safety, successful startup, GPU compatibility, or MT5 compatibility.
+- MT5 Desktop on Android remains experimental; Windows API coverage, graphics, input, networking, device memory, Android lifecycle, and 32/64-bit components can prevent it from running.
+- Do not commit large runtime binaries or any MT5 account credentials to Git. Use release assets or a controlled artifact store after review.
