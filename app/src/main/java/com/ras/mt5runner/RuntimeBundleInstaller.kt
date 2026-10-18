@@ -7,7 +7,6 @@ import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.BufferedInputStream
-import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
@@ -40,7 +39,7 @@ class RuntimeBundleInstaller(context: Context) {
                             val entry = tar.nextTarEntry ?: break
                             entriesSeen++
                             require(entriesSeen <= maxEntries) { "Runtime archive has too many entries" }
-                            val name = entry.name.replace('\\\\', '/')
+                            val name = entry.name
                             if (name != "bundle" && !name.startsWith("bundle/")) continue
                             val relative = name.removePrefix("bundle").trimStart('/')
                             if (relative.isEmpty()) continue
