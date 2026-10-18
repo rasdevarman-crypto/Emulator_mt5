@@ -64,8 +64,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p build/box64-build logs/box64 stage/box64
-          git -C build/runtime-sources/box64 rev-parse HEAD | tee logs/box64/source-commit.txt
-          test "$(git -C build/runtime-sources/box64 rev-parse HEAD)" = "$BOX64_COMMIT"
+          jq -r '.box64.commit' build/runtime-sources/source-audit.json | tee logs/box64/source-commit.txt
+          test "$(jq -r '.box64.commit' build/runtime-sources/source-audit.json)" = "$BOX64_COMMIT"
           cmake -S build/runtime-sources/box64 -B build/box64-build \
             -DARM_DYNAREC=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
             2>&1 | tee logs/box64/configure.log
@@ -78,7 +78,7 @@ jobs:
           grep -q 'AArch64' logs/box64/elf-header.txt
           "$box64_bin" --version 2>&1 | tee logs/box64/version.txt
           dpkg-query -W -f='${binary:Package}=${Version}\n' | sort > logs/box64/apt-packages.txt
-          { cmake --version; gcc --version; git -C build/runtime-sources/box64 rev-parse HEAD; } > logs/box64/toolchain.txt
+          { cmake --version; gcc --version; jq -r '.box64.commit' build/runtime-sources/source-audit.json; } > logs/box64/toolchain.txt
           tar -cJf box64-arm64-install-tree.tar.xz -C stage/box64 usr/local
           sha256sum box64-arm64-install-tree.tar.xz > box64-arm64-install-tree.tar.xz.sha256
       - name: Upload Box64 build output and logs
