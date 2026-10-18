@@ -33,7 +33,7 @@ curl --fail --location --proto '=https' --tlsv1.2 "$wine_url" --output "$wine_ar
 archive_sha="$(sha256sum "$wine_archive" | awk '{print $1}')"
 mkdir "$wine_dir"
 tar -xJf "$wine_archive" --strip-components=1 -C "$wine_dir"
-grep -Eq '^version 11[.]0$' "$wine_dir/VERSION" || {
+grep -Fxq 'Wine version 11.0' "$wine_dir/VERSION" || {
   echo "Wine source version check failed: expected VERSION file to declare version 11.0." >&2
   exit 1
 }
