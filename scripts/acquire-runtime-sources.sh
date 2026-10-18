@@ -35,8 +35,41 @@ curl --fail --location --proto '=https' --tlsv1.2 "$wine_url" --output "$wine_ar
 archive_sha="$(sha256sum "$wine_archive" | awk '{print $1}')"
 mkdir "$wine_dir"
 tar -xJf "$wine_archive" --strip-components=1 -C "$wine_dir"
-grep -Eq 'AC_INIT\(\[Wine\], \[11\.0\]' "$wine_dir/configure.ac" || {
-  echo "Wine source version check failed: expected Wine 11.0 configure.ac." >&2
+grep -Eq '^version 11\.0
+  exit 1
+}
+box64_tree="$(git -C "$box_dir" rev-parse HEAD^{tree})"
+box64_tree_sha="$box64_tree"
+box64_commit_sha="$actual_commit"
+
+jq -n \
+  --arg status "sources-acquired-not-built" \
+  --arg box64_tag "$box64_tag" \
+  --arg box64_commit "$box64_commit_sha" \
+  --arg box64_tree "$box64_tree_sha" \
+  --arg box64_url "https://github.com/ptitSeb/box64" \
+  --arg wine_version "$wine_version" \
+  --arg wine_url "$wine_url" \
+  --arg wine_archive_sha256 "$archive_sha" \
+  --arg created_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{
+    schema_version: 1,
+    status: $status,
+    created_utc: $created_utc,
+    box64: {tag: $box64_tag, commit: $box64_commit, tree: $box64_tree, source_url: $box64_url},
+    wine: {version: $wine_version, source_archive_url: $wine_url, source_archive_sha256: $wine_archive_sha256},
+    notes: [
+      "Source acquisition only; no executable runtime was built.",
+      "Wine archive SHA-256 is calculated from the downloaded file; verify against an independently published WineHQ checksum/signature if available.",
+      "A source checksum does not prove runtime compatibility or MT5 support."
+    ]
+  }' > "$out_dir/source-audit.json"
+
+printf 'Source acquisition complete. Audit: %s/source-audit.json\n' "$out_dir"
+printf 'Box64 commit: %s\nWine archive SHA-256: %s\n' "$actual_commit" "$archive_sha"
+printf 'No Wine/Box64 binaries or Android runtime bundle were built.\n'
+ "$wine_dir/VERSION" || {
+  echo "Wine source version check failed: expected VERSION file to declare version 11.0." >&2
   exit 1
 }
 box64_tree="$(git -C "$box_dir" rev-parse HEAD^{tree})"
