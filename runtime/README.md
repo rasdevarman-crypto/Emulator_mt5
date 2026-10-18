@@ -50,3 +50,16 @@ The provenance script requires `jq`, `sha256sum`, real HTTPS source URLs, non-pl
 ## Experimental build pipeline
 
 See [the runtime build pipeline guide](../docs/RUNTIME_BUILD_PIPELINE.md) and workflow [runtime-build.yml](../.github/workflows/runtime-build.yml). The pipeline builds separate Box64 ARM64 and Wine x86_64 install-tree artifacts with logs and SHA-256 checksums. These are experimental build outputs only, not a ready-to-run Android runtime bundle; rootfs dependency closure and physical-device tests remain required.
+
+
+## Dual-rootfs candidate layout
+
+The experimental build workflow is designed to assemble both `rootfs-arm64/` (ARM64 glibc host environment for Box64) and `rootfs/` (amd64 glibc environment for Wine). Keeping these architectures separate is intentional: the native ARM64 Box64 executable cannot simply be run inside an amd64-only rootfs without ARM64 host libraries.
+
+A candidate artifact is not an Android-ready release. Review the [build pipeline](../docs/RUNTIME_BUILD_PIPELINE.md) and [Android/MT5 test plan](../docs/ANDROID_MT5_TEST_PLAN.md). When the candidate and PE fixtures are available, the ARM64 PRoot smoke script is:
+
+```bash
+bash scripts/smoke-test-runtime-bundle.sh bundle
+```
+
+The script checks Box64, Wine prefix initialization and tiny 32-bit/64-bit PE programs. It does not run MT5 and does not prove Android app integration. The current Android app still has no PRoot/Wine launcher integration; the MT5 launch button remains disabled until that is implemented and tested.
