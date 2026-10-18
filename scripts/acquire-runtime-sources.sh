@@ -7,6 +7,9 @@ box64_commit="2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
 box64_tag="v0.4.4"
 wine_version="11.0"
 wine_url="https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz"
+# SHA-256 captured from the verified source-acquisition run on 2026-10-18.
+# This pins the archive bytes; it is not a substitute for a WineHQ signature check.
+wine_archive_sha256_expected="c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
 
 for tool in git curl tar sha256sum jq; do
   command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 1; }
@@ -31,6 +34,10 @@ git -C "$box_dir" describe --tags --exact-match HEAD | grep -Fx "$box64_tag" >/d
 
 curl --fail --location --proto '=https' --tlsv1.2 "$wine_url" --output "$wine_archive"
 archive_sha="$(sha256sum "$wine_archive" | awk '{print $1}')"
+[[ "$archive_sha" == "$wine_archive_sha256_expected" ]] || {
+  echo "Wine archive SHA-256 mismatch: expected $wine_archive_sha256_expected, got $archive_sha" >&2
+  exit 1
+}
 mkdir "$wine_dir"
 tar -xJf "$wine_archive" --strip-components=1 -C "$wine_dir"
 grep -Fxq 'Wine version 11.0' "$wine_dir/VERSION" || {
@@ -57,7 +64,7 @@ jq -n \
     wine: {version: $wine_version, source_archive_url: $wine_url, source_archive_sha256: $wine_archive_sha256},
     notes: [
       "Source acquisition only; no executable runtime was built.",
-      "Wine archive SHA-256 is calculated from the downloaded file; verify against an independently published WineHQ checksum/signature if available.",
+      "Wine source archive SHA-256 is pinned to the captured official WineHQ archive bytes; this is not an independent signature verification.",
       "A source checksum does not prove runtime compatibility or MT5 support."
     ]
   }' > "$out_dir/source-audit.json"
