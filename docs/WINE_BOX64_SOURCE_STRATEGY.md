@@ -17,7 +17,7 @@
 
 ## Box64 source pin
 
-- **Box64 source candidate:** upstream tag v0.4.4, release page: https://github.com/ptitSeb/box64/releases/tag/v0.4.4. The upstream release page identifies the release commit prefix as 2f130fa. Resolve and record the full commit SHA during acquisition; do not use the short SHA as a manifest pin.
+- **Box64 source candidate:** upstream tag v0.4.4, release page: https://github.com/ptitSeb/box64/releases/tag/v0.4.4. Full upstream tag commit selected and pinned: `2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a` (tag `v0.4.4`). The source-acquisition script verifies that exact commit.
 - Integration references only: https://github.com/winebox64/winlator and https://github.com/winebox64/winlator-wb64. These demonstrate combined Android stacks (Wine, Box64, rootfs/PRoot, graphics components); they are not a source of unreviewed binary files to copy into this app.
 
 ## Dependency and compatibility inventory
@@ -36,7 +36,7 @@
 
 ## Reproducible acquisition steps
 
-1. Fetch Box64 from its upstream Git repository at tag v0.4.4, resolve the full commit SHA, inspect its license and build docs, and build for the chosen glibc rootfs. The upstream compile guide has separate ARM64 and Termux paths; do not assume the native Termux build runs glibc Linux binaries.
+1. Fetch Box64 from its upstream Git repository at tag v0.4.4 and commit `2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a`; inspect its license and build docs, and build for the chosen glibc rootfs. The upstream compile guide has separate ARM64 and Termux paths; do not assume the native Termux build runs glibc Linux binaries.
 2. Fetch the official WineHQ 11.0 source archive above and verify its official source URL and checksum/signature if published. Record the archive SHA-256 locally; do not invent a checksum or substitute a third-party binary.
 3. Configure Wine for the **new WoW64** mode with `--enable-archs=i386,x86_64`, using a pinned build environment with the required PE toolchains. Record the exact configure output, compiler/toolchain versions, package inventory and build log. If this configuration cannot be built reproducibly, stop and document the missing dependency rather than silently switching modes.
 4. Build/package in a pinned rootfs/container. Capture package list, license notices and SHA-256 for all produced artifacts.
@@ -47,8 +47,13 @@
 ## Explicit limitations
 
 - The repository currently contains no runnable Wine/Box64 binaries or rootfs. No runtime bundle is being claimed as built by this commit.
-- Box64 v0.4.4 is a source candidate, not a verified Android binary; its full commit SHA still must be resolved and recorded before build.
+- Box64 v0.4.4 is a source candidate pinned to commit `2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a`, not a verified Android binary.
 - Wine 11.0 stable and the new WoW64 configure mode are selected from official WineHQ release information, but the cross-platform build, dependency closure, Android execution and MT5 compatibility are not yet verified.
 - Passing JSON/hash/ELF checks does not establish source authenticity, malware safety, successful startup, GPU compatibility, or MT5 compatibility.
 - MT5 Desktop on Android remains experimental; Windows API coverage, graphics, input, networking, device memory, Android lifecycle, and 32/64-bit components can prevent it from running.
 - Do not commit large runtime binaries or any MT5 account credentials to Git. Use release assets or a controlled artifact store after review.
+
+
+## Automated source acquisition
+
+Run `bash scripts/acquire-runtime-sources.sh build/runtime-sources` to acquire the pinned Box64 source tree and official WineHQ 11.0 source archive, check the Box64 commit and Wine source version, and produce `source-audit.json` with the downloaded Wine archive SHA-256. The `Runtime Source Acquisition Audit` workflow runs the same procedure and uploads source inputs plus the audit as a short-lived CI artifact. This is source acquisition only: it does not build Wine/Box64 executables, select a final rootfs, or create `runtime/bundle`.
