@@ -8,18 +8,21 @@ The GitHub Actions workflow `.github/workflows/runtime-build.yml` is a source-pi
 2. **Wine 11.0 x86_64 Linux install tree** configured with `--enable-archs=i386,x86_64` for the new WoW64 PE architecture mode. The Wine source archive is pinned by SHA-256:
    `c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701`.
 
-The workflow records compiler/toolchain versions, installed Ubuntu package versions, configure/build/install logs, ELF architecture for Box64, and checksums for produced install-tree archives. Artifacts expire after seven days. The build lanes are independent after source verification so that failures can be diagnosed separately.
+The workflow records compiler/toolchain versions, installed Ubuntu package versions, configure/build/install logs, ELF architecture for Box64, and checksums for produced install-tree archives. If both builds succeed, later stages assemble two separate Ubuntu 24.04 root filesystems: ARM64 glibc for native Box64/PRoot and amd64 glibc for Wine. The amd64 rootfs installs runtime libraries and audits Wine ELF dependencies with `ldd`. A candidate bundle manifest and provenance records are then generated and statically checked. Artifacts expire after seven days. The build lanes are independent after source verification so that failures can be diagnosed separately.
 
 ## Trigger and outputs
 
 Run it manually from **Actions → Experimental Wine WoW64 + Box64 Build → Run workflow**, or push a change to the workflow or source-acquisition script.
 
-Expected artifacts when each lane succeeds:
+Expected artifacts when stages succeed:
 
 - `box64-arm64-build-output`
-- `wine-11.0-wow64-x86_64-build-output`
+- `wine-11.0-wow64-x86_64-build-output` (also contains small i386/x86_64 Windows PE smoke fixtures)
+- `arm64-host-rootfs`
+- `runtime-bundle-candidate`
+- `arm64-runtime-smoke-evidence`
 
-Each artifact includes a compressed install tree, its SHA-256 file, and build logs. A failed lane uploads any logs and partial output that exist, for diagnosis.
+A successful candidate package must pass manifest/provenance checks and an ARM64 Linux PRoot smoke stage that attempts Wine prefix initialization and executes both PE fixtures under Box64. A failed lane uploads any logs and partial output that exist, for diagnosis.
 
 ## Reproducibility boundary
 
@@ -39,3 +42,8 @@ These are separate build outputs, **not a combined Android runtime bundle**. In 
 - install or run MetaTrader 5.
 
 Do not label either artifact as Android-ready, and do not set the runtime manifest to `ready` based only on a successful compile. The next release gate is dependency closure + rootfs packaging + on-device smoke tests. Keep all build outputs as CI artifacts until that gate passes.
+
+
+## Android and MT5 release gate
+
+The current Android app does not launch PRoot, Box64, or Wine; its MT5 launch button is intentionally disabled. A CI Linux/PRoot smoke test is not equivalent to physical Android validation. Follow [the Android and MT5 test plan](ANDROID_MT5_TEST_PLAN.md) and use `bash scripts/smoke-test-runtime-bundle.sh bundle` on an ARM64 PRoot environment. Do not mark a candidate as Android-validated or MT5-validated without that evidence.
