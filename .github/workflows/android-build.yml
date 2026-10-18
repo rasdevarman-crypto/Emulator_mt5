@@ -49,21 +49,19 @@ jobs:
           set +o pipefail
           yes | "$sdkmanager_bin" --licenses >/dev/null
           set -o pipefail
-          "$sdkmanager_bin" --install "ndk;23.2.8568313"
+          "$sdkmanager_bin" --install "ndk;28.2.13676358"
 
       - name: Build pinned Android-native PRoot
         shell: bash
         run: |
           set -Eeuo pipefail
-          git clone https://github.com/green-green-avk/build-proot-android.git build-proot-android
-          git -C build-proot-android checkout 01f83b8841358450c78333d1b33ab30d4943bec4
-          cd build-proot-android
-          sed -i "s|^ARCHS=.*|ARCHS='aarch64'|" config
-          sed -i "s|^NDK=.*|NDK=\"$ANDROID_HOME/ndk/23.2.8568313\"|" config
-          ./build.sh
+          git clone https://github.com/berilevi/proot-static.git proot-static
+          git -C proot-static checkout 6f8ebfd8e24887dfba64c3f2d7d5fe9dc059b60e
+          cd proot-static
+          NDK="$ANDROID_HOME/ndk/28.2.13676358" OUT="$RUNNER_TEMP/proot-build" REPO_ARTIFACT_DIR="$RUNNER_TEMP/proot-dist" tools/build-static-aarch64.sh
           cd "$GITHUB_WORKSPACE"
           mkdir -p app/src/main/assets/runtime/proot
-          cp -a build-proot-android/build/root-aarch64/root/. app/src/main/assets/runtime/proot/
+          cp -a "$RUNNER_TEMP/proot-build/root/." app/src/main/assets/runtime/proot/
           test -x app/src/main/assets/runtime/proot/bin/proot
           readelf -h app/src/main/assets/runtime/proot/bin/proot | tee /tmp/proot-elf.txt
           grep -q AArch64 /tmp/proot-elf.txt
