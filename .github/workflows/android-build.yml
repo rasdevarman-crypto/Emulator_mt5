@@ -40,6 +40,28 @@ jobs:
           bash -n scripts/verify-runtime-provenance.sh
           jq empty runtime/runtime-manifest.example.json
 
+      - name: Set up Android SDK and NDK for native PRoot
+        uses: android-actions/setup-android@v3
+
+      - name: Build pinned Android-native PRoot
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sdkmanager "ndk;23.2.8568313"
+          git clone https://github.com/green-green-avk/build-proot-android.git build-proot-android
+          git -C build-proot-android checkout 01f83b8841358450c78333d1b33ab30d4943bec4
+          cd build-proot-android
+          sed -i "s|^ARCHS=.*|ARCHS='aarch64'|" config
+          sed -i "s|^NDK=.*|NDK=\"$ANDROID_HOME/ndk/23.2.8568313\"|" config
+          ./build.sh
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p app/src/main/assets/runtime/proot
+          cp -a build-proot-android/build/root-aarch64/root/. app/src/main/assets/runtime/proot/
+          test -x app/src/main/assets/runtime/proot/bin/proot
+          readelf -h app/src/main/assets/runtime/proot/bin/proot | tee /tmp/proot-elf.txt
+          grep -q AArch64 /tmp/proot-elf.txt
+          sha256sum app/src/main/assets/runtime/proot/bin/proot > app/src/main/assets/runtime/proot/proot.sha256
+
       - name: Build debug APK
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: gradle --no-daemon assembleDebug
