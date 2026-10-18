@@ -63,3 +63,10 @@ This is not yet a combined Android runtime: it does not pin/package the complete
 ## Automated source acquisition
 
 Run `bash scripts/acquire-runtime-sources.sh build/runtime-sources` to acquire the pinned Box64 source tree and official WineHQ 11.0 source archive, check the Box64 commit and Wine source version, and produce `source-audit.json` with the downloaded Wine archive SHA-256. The `Runtime Source Acquisition Audit` workflow runs the same procedure and uploads source inputs plus the audit as a short-lived CI artifact. This is source acquisition only: it does not build Wine/Box64 executables, select a final rootfs, or create `runtime/bundle`.
+
+
+## Dual-rootfs packaging and validation gates
+
+The build workflow now attempts to package both an ARM64 Ubuntu 24.04 glibc host rootfs (for Box64/PRoot) and an amd64 Ubuntu 24.04 rootfs (for Wine). It records apt package versions and checks Wine ELF dependencies before creating a candidate manifest. An ARM64 Linux PRoot stage attempts Wine prefix initialization plus 32-bit and 64-bit PE smoke tests.
+
+This remains experimental until a current run passes. The Android app itself still does not launch the runtime, and MT5 has not been installed or tested. See [the Android/MT5 test plan](ANDROID_MT5_TEST_PLAN.md).
