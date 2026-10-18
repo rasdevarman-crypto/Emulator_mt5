@@ -364,8 +364,7 @@ jobs:
           cd build/wine-source
           ./configure --enable-archs=i386,x86_64 --prefix=/opt/wine-11.0-wow64 \
             2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/configure.log"
-          grep -Eq 'i386 architecture: yes' "$GITHUB_WORKSPACE/logs/wine/configure.log"
-          grep -Eq 'x86_64 architecture: yes' "$GITHUB_WORKSPACE/logs/wine/configure.log"
+          grep -Eq '^PE_ARCHS = .*i386.*x86_64' Makefile
           printf '%s\n' './configure --enable-archs=i386,x86_64 --prefix=/opt/wine-11.0-wow64' > "$GITHUB_WORKSPACE/logs/wine/configure-args.txt"
           make -j2 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/build.log"
           make install DESTDIR="$GITHUB_WORKSPACE/stage/wine" 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/install.log"
