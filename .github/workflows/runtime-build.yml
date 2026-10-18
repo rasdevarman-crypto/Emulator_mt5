@@ -137,11 +137,22 @@ jobs:
             fi
             apt-get update
             apt-get install -y --no-install-recommends ca-certificates file libc-bin libasound2t64 libasound2-plugins libpulse0 libx11-6 libxext6 libxrender1 libxrandr2 libxi6 libxfixes3 libxcursor1 libxinerama1 libxkbcommon0 libgl1 libvulkan1 libfontconfig1 libfreetype6 libdbus-1-3 libgnutls30t64 libgphoto2-6t64 libldap2 libmpg123-0t64 libopenal1 libpcap0.8t64 libsane1 libudev1 libunwind8 libusb-1.0-0 libv4l-0 libxcomposite1 libxdamage1 libxkbfile1 libxml2 libxslt1.1 libxxf86vm1 zlib1g libgcc-s1 libstdc++6 libncurses6 libtinfo6 libfaudio0 libvkd3d1 libvkd3d-shader1
-            dpkg-query -W -f="\${binary:Package}=\${Version}\\\\n" | sort > /tmp/runtime-apt-packages.txt
+            dpkg-query -W -f="\${binary:Package}=\${Version}\n" | sort > /tmp/runtime-apt-packages.txt
+            find /opt/wine-11.0-wow64 -type f -print0 | while IFS= read -r -d "" f; do
+              if file "$f" | grep -q ELF; then
+                deps="$(ldd "$f" 2>&1 || true)"
+                if grep -q "not found" <<< "$deps"; then
+                  printf "Unresolved shared library for %s:\\n%s\\n" "$f" "$deps" >&2
+                  exit 1
+                fi
+              fi
+            done
             apt-get clean
             rm -rf /var/lib/apt/lists/*
           '
           sudo cp bundle/rootfs/tmp/runtime-apt-packages.txt provenance/rootfs-apt-packages.txt
+          mkdir -p bundle/provenance
+          cp provenance/rootfs-apt-packages.txt bundle/provenance/rootfs-apt-packages.txt
           sudo rm bundle/rootfs/tmp/runtime-apt-packages.txt
           sudo chown -R "$USER":"$USER" bundle/rootfs
           mkdir -p bundle/rootfs/opt
@@ -160,10 +171,10 @@ jobs:
           test -x bundle/rootfs/opt/wine-11.0-wow64/bin/wine
           test -f bundle/rootfs/etc/os-release
           grep -q 'VERSION_ID="24.04"' bundle/rootfs/etc/os-release
-          wine_version="$(cat provenance/version.txt 2>/dev/null || true)"
-          if [[ -z "$wine_version" ]]; then wine_version="$(grep -hE 'wine-[0-9]+\.[0-9]+' provenance/version.txt 2>/dev/null | head -n1 || true)"; fi
+          wine_version="$(cat provenance/wine/version.txt 2>/dev/null || true)"
+          if [[ -z "$wine_version" ]]; then wine_version="$(grep -hE 'wine-[0-9]+\.[0-9]+' provenance/wine/version.txt 2>/dev/null | head -n1 || true)"; fi
           [[ -n "$wine_version" ]] || wine_version="wine-11.0 (version output recorded in provenance)"
-          box64_version="$(grep -hE 'v?0\.4\.4|Box64' provenance/version.txt 2>/dev/null | head -n1 || true)"
+          box64_version="$(grep -hE 'v?0\.4\.4|Box64' provenance/box64/version.txt 2>/dev/null | head -n1 || true)"
           [[ -n "$box64_version" ]] || box64_version="Box64 v0.4.4 (version output recorded in provenance)"
           box64_sha="$(sha256sum bundle/bin/box64 | awk '{print $1}')"
           wine_sha="$(sha256sum bundle/bin/wine | awk '{print $1}')"
@@ -218,10 +229,10 @@ jobs:
           wineboot_bin="$PWD/bundle/rootfs/opt/wine-11.0-wow64/bin/wineboot"
           ./bundle/bin/box64 "$wine_bin" --version 2>&1 | tee wine-under-box64-smoke.txt
           grep -q 'wine-11.0' wine-under-box64-smoke.txt
-          ./bundle/bin/box64 "$wineboot_bin" --init 2>&1 | tee wineboot-smoke.txt
-          ./bundle/bin/box64 "$wine_bin" "$PWD/bundle/provenance/test-fixtures/runtime-smoke-x86_64.exe" 2>&1 | tee pe-x86_64-smoke.txt
+          timeout 180s ./bundle/bin/box64 "$wineboot_bin" --init 2>&1 | tee wineboot-smoke.txt
+          ./bundle/bin/box64 "$wine_bin" "$PWD/provenance/test-fixtures/runtime-smoke-x86_64.exe" 2>&1 | tee pe-x86_64-smoke.txt
           grep -q 'RUNTIME_SMOKE_OK pointer_bits=64' pe-x86_64-smoke.txt
-          ./bundle/bin/box64 "$wine_bin" "$PWD/bundle/provenance/test-fixtures/runtime-smoke-i386.exe" 2>&1 | tee pe-i386-smoke.txt
+          ./bundle/bin/box64 "$wine_bin" "$PWD/provenance/test-fixtures/runtime-smoke-i386.exe" 2>&1 | tee pe-i386-smoke.txt
           grep -q 'RUNTIME_SMOKE_OK pointer_bits=32' pe-i386-smoke.txt
           sha256sum box64-smoke-version.txt wine-under-box64-smoke.txt wineboot-smoke.txt pe-x86_64-smoke.txt pe-i386-smoke.txt > runtime-smoke.sha256
       - name: Upload ARM64 smoke-test evidence
