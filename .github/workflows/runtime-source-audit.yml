@@ -27,7 +27,7 @@ jobs:
           test "$(jq -r '.status' build/runtime-sources/source-audit.json)" = "sources-acquired-not-built"
           test "$(jq -r '.box64.commit' build/runtime-sources/source-audit.json)" = "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
           test "$(jq -r '.wine.version' build/runtime-sources/source-audit.json)" = "11.0"
-          test "$(jq -r '.wine.source_archive_sha256' build/runtime-sources/source-audit.json | grep -Ec '^[a-f0-9]{64}$')" = "1"
+          test "$(jq -r '.wine.source_archive_sha256' build/runtime-sources/source-audit.json)" = "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
       - name: Upload acquired source inputs and audit (not runtime binaries)
         uses: actions/upload-artifact@v4
         with:
