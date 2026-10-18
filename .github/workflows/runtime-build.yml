@@ -133,7 +133,7 @@ jobs:
           file rootfs-arm64/usr/local/bin/box64 | tee arm64-rootfs-box64-file.txt
           readelf -h rootfs-arm64/usr/local/bin/box64 | tee arm64-rootfs-box64-elf.txt
           grep -q AArch64 arm64-rootfs-box64-elf.txt
-          tar -cJf arm64-host-rootfs.tar.xz rootfs-arm64
+          sudo tar --numeric-owner -cJf arm64-host-rootfs.tar.xz rootfs-arm64
           sha256sum arm64-host-rootfs.tar.xz > arm64-host-rootfs.tar.xz.sha256
       - name: Upload ARM64 host rootfs
         if: always()
