@@ -42,5 +42,6 @@ The provenance script requires `jq`, `sha256sum`, real HTTPS source URLs, non-pl
 - Read [the source strategy](../docs/WINE_BOX64_SOURCE_STRATEGY.md) before acquiring artifacts.
 - Track required evidence in [the runtime dependency matrix](../docs/RUNTIME_DEPENDENCY_MATRIX.md).
 - First Box64 source candidate: upstream v0.4.4; it is a source pin candidate, not a built Android binary.
-- Wine version and rootfs release remain intentionally unpinned until the exact WoW64 build and full dependency closure can be verified.
+- Wine source/version selected: official WineHQ 11.0 stable with new WoW64 configure mode `--enable-archs=i386,x86_64`; the build and full dependency closure are not yet verified.
+- Rootfs release remains unpinned until the runtime dependency closure can be verified.
 - GitHub Actions now checks shell syntax, the example manifest JSON, and that an absent bundle or placeholder metadata is rejected. These CI checks do not run Wine or MT5.
