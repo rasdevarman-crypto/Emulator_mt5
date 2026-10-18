@@ -55,7 +55,6 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          sdkmanager "ndk;23.2.8568313"
           git clone https://github.com/green-green-avk/build-proot-android.git build-proot-android
           git -C build-proot-android checkout 01f83b8841358450c78333d1b33ab30d4943bec4
           cd build-proot-android
