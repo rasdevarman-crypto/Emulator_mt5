@@ -40,8 +40,8 @@ class RuntimeManager(context: Context) {
     }
 
     fun launchInstaller(installer: File, onLine: (String) -> Unit): Process {
-        val check = preflight()
-        check(!check.ready.not()) { check.message }
+        val preflightResult = preflight()
+        check(preflightResult.ready) { preflightResult.message }
         require(installer.isFile && installer.canRead()) { "Installer file is not readable" }
         prefix.mkdirs()
         val ldPath = listOf(
@@ -75,8 +75,8 @@ class RuntimeManager(context: Context) {
 
     fun launchMt5(onLine: (String) -> Unit): Process {
         val executable = mt5Executable()
-        val check = preflight()
-        check(check.ready) { check.message }
+        val preflightResult = preflight()
+        check(preflightResult.ready) { preflightResult.message }
         prefix.mkdirs()
         val ldPath = listOf(
             "/x86root/lib/x86_64-linux-gnu",
