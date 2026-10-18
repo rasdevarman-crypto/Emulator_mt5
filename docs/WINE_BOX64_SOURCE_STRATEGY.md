@@ -54,6 +54,12 @@
 - Do not commit large runtime binaries or any MT5 account credentials to Git. Use release assets or a controlled artifact store after review.
 
 
+## Automated source-pinned build pipeline
+
+The workflow `.github/workflows/runtime-build.yml` now verifies the pinned Box64 commit and the WineHQ 11.0 archive SHA-256 (`c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701`), then builds Box64 for ARM64 glibc Linux and Wine for x86_64 Linux in separate CI jobs. It records build logs, package/toolchain versions and output checksums. See [the build pipeline guide](RUNTIME_BUILD_PIPELINE.md).
+
+This is not yet a combined Android runtime: it does not pin/package the complete glibc rootfs, close all runtime shared-library dependencies, or validate Wine under Box64 on a physical Android device. It is source-pinned and repeatable, but bit-for-bit reproducibility is not guaranteed while hosted runner images and apt repositories can change. The archive SHA-256 detects byte changes but is not an independent WineHQ signature verification.
+
 ## Automated source acquisition
 
 Run `bash scripts/acquire-runtime-sources.sh build/runtime-sources` to acquire the pinned Box64 source tree and official WineHQ 11.0 source archive, check the Box64 commit and Wine source version, and produce `source-audit.json` with the downloaded Wine archive SHA-256. The `Runtime Source Acquisition Audit` workflow runs the same procedure and uploads source inputs plus the audit as a short-lived CI artifact. This is source acquisition only: it does not build Wine/Box64 executables, select a final rootfs, or create `runtime/bundle`.
