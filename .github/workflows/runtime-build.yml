@@ -112,6 +112,7 @@ jobs:
           set -Eeuo pipefail
           sudo debootstrap --variant=minbase noble rootfs-arm64 http://ports.ubuntu.com/ubuntu-ports/
           sudo install -d rootfs-arm64/usr/local/bin
+          sudo install -m 0755 /bin/bash rootfs-arm64/bin/bash
           sudo tar -xJf build/box64-output/box64-arm64-install-tree.tar.xz -C /tmp
           sudo install -m 0755 /tmp/usr/local/bin/box64 rootfs-arm64/usr/local/bin/box64
           sudo rm -rf /tmp/usr
@@ -363,6 +364,8 @@ jobs:
           cd build/wine-source
           ./configure --enable-archs=i386,x86_64 --prefix=/opt/wine-11.0-wow64 \
             2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/configure.log"
+          grep -Eq 'i386 architecture: yes' "$GITHUB_WORKSPACE/logs/wine/configure.log"
+          grep -Eq 'x86_64 architecture: yes' "$GITHUB_WORKSPACE/logs/wine/configure.log"
           printf '%s\n' './configure --enable-archs=i386,x86_64 --prefix=/opt/wine-11.0-wow64' > "$GITHUB_WORKSPACE/logs/wine/configure-args.txt"
           make -j2 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/build.log"
           make install DESTDIR="$GITHUB_WORKSPACE/stage/wine" 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/install.log"
