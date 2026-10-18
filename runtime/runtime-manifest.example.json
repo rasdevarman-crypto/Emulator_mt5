@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "status": "example-only-not-runnable",
+  "target_android_abi": "arm64-v8a",
+  "box64": {
+    "path": "bin/box64",
+    "version": "REPLACE_WITH_VERIFIED_VERSION",
+    "source_url": "REPLACE_WITH_TRUSTED_UPSTREAM_URL",
+    "sha256": "REPLACE_WITH_64_HEX_SHA256"
+  },
+  "wine": {
+    "path": "bin/wine",
+    "version": "REPLACE_WITH_VERIFIED_VERSION",
+    "source_url": "REPLACE_WITH_TRUSTED_UPSTREAM_URL",
+    "sha256": "REPLACE_WITH_64_HEX_SHA256"
+  },
+  "rootfs_path": "rootfs",
+  "notes": "Metadata template only. Not a runnable runtime and not evidence of MT5 compatibility."
+}
