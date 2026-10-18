@@ -46,7 +46,9 @@ jobs:
           set -Eeuo pipefail
           sdkmanager_bin="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort | tail -n1)"
           test -x "$sdkmanager_bin"
+          set +o pipefail
           yes | "$sdkmanager_bin" --licenses >/dev/null
+          set -o pipefail
           "$sdkmanager_bin" --install "ndk;23.2.8568313"
 
       - name: Build pinned Android-native PRoot
