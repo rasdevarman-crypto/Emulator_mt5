@@ -67,7 +67,7 @@ jobs:
           jq -r '.box64.commit' build/runtime-sources/source-audit.json | tee logs/box64/source-commit.txt
           test "$(jq -r '.box64.commit' build/runtime-sources/source-audit.json)" = "$BOX64_COMMIT"
           cmake -S build/runtime-sources/box64 -B build/box64-build \
-            -DARM_DYNAREC=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DARM_DYNAREC=ON -DNOGIT=1 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
             2>&1 | tee logs/box64/configure.log
           cmake --build build/box64-build --parallel 2 2>&1 | tee logs/box64/build.log
           DESTDIR="$PWD/stage/box64" cmake --install build/box64-build 2>&1 | tee logs/box64/install.log
