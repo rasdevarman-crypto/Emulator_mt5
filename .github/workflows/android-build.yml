@@ -7,6 +7,39 @@ on:
 permissions:
   contents: read
 jobs:
+  runtime-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate shell syntax
+        run: bash -n scripts/check-runtime-bundle.sh scripts/verify-runtime-provenance.sh
+      - name: Validate example manifest JSON
+        run: jq empty runtime/runtime-manifest.example.json
+      - name: Confirm empty bundle is reported as not ready
+        shell: bash
+        run: |
+          set +e
+          output="$(bash scripts/check-runtime-bundle.sh runtime/bundle 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -eq 2
+          grep -q "No runtime bundle found" <<< "$output"
+      - name: Confirm example manifest cannot pass provenance checks
+        shell: bash
+        run: |
+          mkdir -p runtime/bundle/bin runtime/bundle/rootfs
+          cp runtime/runtime-manifest.example.json runtime/bundle/manifest.json
+          printf '#!/bin/sh\nexit 0\n' > runtime/bundle/bin/box64
+          printf '#!/bin/sh\nexit 0\n' > runtime/bundle/bin/wine
+          chmod +x runtime/bundle/bin/box64 runtime/bundle/bin/wine
+          set +e
+          output="$(bash scripts/verify-runtime-provenance.sh runtime/bundle 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -eq 1
+          grep -q "manifest status must be candidate or ready-for-review" <<< "$output"
   build:
     runs-on: ubuntu-latest
     steps:
