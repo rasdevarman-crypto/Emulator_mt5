@@ -133,7 +133,7 @@ jobs:
           file rootfs-arm64/usr/local/bin/box64 | tee arm64-rootfs-box64-file.txt
           readelf -h rootfs-arm64/usr/local/bin/box64 | tee arm64-rootfs-box64-elf.txt
           grep -q AArch64 arm64-rootfs-box64-elf.txt
-          sudo tar --numeric-owner -cJf arm64-host-rootfs.tar.xz rootfs-arm64
+          sudo tar --numeric-owner --exclude='rootfs-arm64/dev/*' -cJf arm64-host-rootfs.tar.xz rootfs-arm64
           sha256sum arm64-host-rootfs.tar.xz > arm64-host-rootfs.tar.xz.sha256
       - name: Upload ARM64 host rootfs
         if: always()
@@ -254,7 +254,7 @@ jobs:
             }' > bundle/manifest.json
           bash scripts/check-runtime-bundle.sh bundle
           bash scripts/verify-runtime-provenance.sh bundle
-          tar -cJf runtime-bundle-candidate.tar.xz bundle provenance
+          sudo tar --numeric-owner -cJf runtime-bundle-candidate.tar.xz bundle provenance
           sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256
       - name: Upload candidate bundle and provenance
         if: always()
