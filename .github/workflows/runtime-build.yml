@@ -93,6 +93,132 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  package-rootfs-bundle:
+    name: Assemble Ubuntu rootfs and candidate bundle
+    needs: [build-box64, build-wine]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: box64-arm64-build-output
+          path: build/box64-output
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: wine-11.0-wow64-x86_64-build-output
+          path: build/wine-output
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pinned-runtime-sources
+          path: build/runtime-sources
+      - name: Install rootfs tools
+        run: sudo apt-get update && sudo apt-get install -y debootstrap proot file binutils jq xz-utils
+      - name: Build Ubuntu 24.04 x86_64 rootfs and stage candidate bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p bundle/bin bundle/rootfs provenance
+          tar -xJf build/box64-output/box64-arm64-install-tree.tar.xz -C bundle
+          test -x bundle/usr/local/bin/box64
+          install -m 0755 bundle/usr/local/bin/box64 bundle/bin/box64
+          rm -rf bundle/usr
+          sudo debootstrap --variant=minbase noble bundle/rootfs http://archive.ubuntu.com/ubuntu/
+          sudo cp build/wine-output/wine-11.0-wow64-x86_64-install-tree.tar.xz bundle/
+          sudo tar -xJf bundle/wine-11.0-wow64-x86_64-install-tree.tar.xz -C bundle/rootfs
+          sudo rm bundle/wine-11.0-wow64-x86_64-install-tree.tar.xz
+          sudo install -m 0755 /bin/bash bundle/rootfs/bin/bash
+          sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates file libc-bin libasound2t64 libasound2-plugins libpulse0 libx11-6 libxext6 libxrender1 libxrandr2 libxi6 libxfixes3 libxcursor1 libxinerama1 libxkbcommon0 libgl1 libvulkan1 libfontconfig1 libfreetype6 libdbus-1-3 libgnutls30t64 libgphoto2-6t64 libldap2 libmpg123-0t64 libopenal1 libpcap0.8t64 libsane1 libudev1 libunwind8 libusb-1.0-0 libv4l-0 libxcomposite1 libxdamage1 libxkbfile1 libxml2 libxslt1.1 libxxf86vm1 zlib1g libgcc-s1 libstdc++6 libncurses6 libtinfo6 libfaudio0 libvkd3d1 libvkd3d-shader1
+            dpkg-query -W -f="${binary:Package}=${Version}\\n" | sort > /tmp/runtime-apt-packages.txt
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
+          '
+          sudo cp bundle/rootfs/tmp/runtime-apt-packages.txt provenance/rootfs-apt-packages.txt
+          sudo rm bundle/rootfs/tmp/runtime-apt-packages.txt
+          sudo chown -R "$USER":"$USER" bundle/rootfs
+          mkdir -p bundle/rootfs/opt
+          ln -s ../rootfs/opt/wine-11.0-wow64/bin/wine bundle/bin/wine
+          cp build/runtime-sources/source-audit.json provenance/source-audit.json
+          cp build/box64-output/logs/box64/* provenance/
+          cp build/wine-output/logs/wine/* provenance/
+          cp build/box64-output/box64-arm64-install-tree.tar.xz.sha256 provenance/ || true
+          cp build/wine-output/wine-11.0-wow64-x86_64-install-tree.tar.xz.sha256 provenance/ || true
+          file bundle/bin/box64 | tee provenance/box64-file.txt
+          readelf -h bundle/bin/box64 | tee provenance/box64-elf-header.txt
+          grep -q AArch64 provenance/box64-elf-header.txt
+          test -x bundle/rootfs/opt/wine-11.0-wow64/bin/wine
+          test -f bundle/rootfs/etc/os-release
+          grep -q 'VERSION_ID="24.04"' bundle/rootfs/etc/os-release
+          wine_version="$(cat provenance/version.txt 2>/dev/null || true)"
+          if [[ -z "$wine_version" ]]; then wine_version="$(grep -hE 'wine-[0-9]+\.[0-9]+' provenance/version.txt 2>/dev/null | head -n1 || true)"; fi
+          [[ -n "$wine_version" ]] || wine_version="wine-11.0 (version output recorded in provenance)"
+          box64_version="$(grep -hE 'v?0\.4\.4|Box64' provenance/version.txt 2>/dev/null | head -n1 || true)"
+          [[ -n "$box64_version" ]] || box64_version="Box64 v0.4.4 (version output recorded in provenance)"
+          box64_sha="$(sha256sum bundle/bin/box64 | awk '{print $1}')"
+          wine_sha="$(sha256sum bundle/bin/wine | awk '{print $1}')"
+          jq -n             --arg box64_version "$box64_version"             --arg box64_sha "$box64_sha"             --arg wine_version "$wine_version"             --arg wine_sha "$wine_sha"             --arg box64_source "https://github.com/ptitSeb/box64"             --arg wine_source "https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz"             --arg box64_commit "$BOX64_COMMIT"             --arg wine_archive_sha "$WINE_SHA256"             '{
+              schema_version: 1,
+              status: "candidate",
+              target_android_abi: "arm64-v8a",
+              box64: {path:"bin/box64", version:$box64_version, source_url:$box64_source, source_commit:$box64_commit, sha256:$box64_sha},
+              wine: {path:"bin/wine", version:$wine_version, source_url:$wine_source, source_archive_sha256:$wine_archive_sha, sha256:$wine_sha},
+              rootfs_path:"rootfs",
+              rootfs:{distribution:"Ubuntu", version:"24.04", architecture:"amd64", packages_file:"../provenance/rootfs-apt-packages.txt"},
+              notes:"Experimental candidate assembled by CI. Not yet Android-device or MT5 validated; candidate status is not a compatibility claim."
+            }' > bundle/manifest.json
+          bash scripts/check-runtime-bundle.sh bundle
+          bash scripts/verify-runtime-provenance.sh bundle
+          tar -cJf runtime-bundle-candidate.tar.xz bundle provenance
+          sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256
+      - name: Upload candidate bundle and provenance
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: runtime-bundle-candidate
+          path: |
+            runtime-bundle-candidate.tar.xz
+            runtime-bundle-candidate.tar.xz.sha256
+            provenance/
+          if-no-files-found: warn
+          retention-days: 7
+
+  arm64-runtime-smoke:
+    name: ARM64 Linux smoke test for Box64 + Wine
+    needs: package-rootfs-bundle
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: runtime-bundle-candidate
+          path: build
+      - name: Extract candidate and run basic emulation smoke test
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tar -xJf build/runtime-bundle-candidate.tar.xz
+          test -x bundle/bin/box64
+          ./bundle/bin/box64 --version 2>&1 | tee box64-smoke-version.txt
+          export BOX64_LD_LIBRARY_PATH="$PWD/bundle/rootfs/lib/x86_64-linux-gnu:$PWD/bundle/rootfs/usr/lib/x86_64-linux-gnu:$PWD/bundle/rootfs/lib64:$PWD/bundle/rootfs/opt/wine-11.0-wow64/lib"
+          export BOX64_LOG=1
+          ./bundle/bin/box64 ./bundle/rootfs/opt/wine-11.0-wow64/bin/wine --version 2>&1 | tee wine-under-box64-smoke.txt
+          grep -q 'wine-11.0' wine-under-box64-smoke.txt
+          sha256sum box64-smoke-version.txt wine-under-box64-smoke.txt > runtime-smoke.sha256
+      - name: Upload ARM64 smoke-test evidence
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: arm64-runtime-smoke-evidence
+          path: |
+            box64-smoke-version.txt
+            wine-under-box64-smoke.txt
+            runtime-smoke.sha256
+          if-no-files-found: warn
+          retention-days: 7
+
   build-wine:
     name: Build Wine 11.0 new WoW64 for x86_64 Linux
     needs: acquire
