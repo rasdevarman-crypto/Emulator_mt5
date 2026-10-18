@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: runtime-build-${{ github.ref }}
+  group: runtime-build-v2-${{ github.ref }}
   cancel-in-progress: true
 
 env:
