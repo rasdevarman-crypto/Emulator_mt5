@@ -72,6 +72,39 @@ class RuntimeManager(context: Context) {
         }
     }
 
+
+    fun launchMt5(onLine: (String) -> Unit): Process {
+        val executable = mt5Executable()
+        val check = preflight()
+        check(check.ready) { check.message }
+        prefix.mkdirs()
+        val ldPath = listOf(
+            "/x86root/lib/x86_64-linux-gnu",
+            "/x86root/usr/lib/x86_64-linux-gnu",
+            "/x86root/lib64",
+            "/x86root/opt/wine-11.0-wow64/lib"
+        ).joinToString(":")
+        val command = listOf(
+            proot.absolutePath, "-r", hostRoot.absolutePath,
+            "-b", "${wineRoot.absolutePath}:/x86root",
+            "-b", "${prefix.absolutePath}:/wineprefix",
+            "/usr/bin/env",
+            "BOX64_LD_LIBRARY_PATH=$ldPath",
+            "WINEPREFIX=/wineprefix",
+            "WINEDEBUG=-all",
+            "/usr/local/bin/box64",
+            "/x86root/opt/wine-11.0-wow64/bin/wine",
+            "/wineprefix/drive_c/Program Files/MetaTrader 5/${executable.name}"
+        )
+        return ProcessBuilder(command).redirectErrorStream(true).start().also { process ->
+            Thread({
+                process.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { line -> onLine(line.take(2000)) }
+                }
+            }, "wine-mt5-log").apply { isDaemon = true; start() }
+        }
+    }
+
     fun mt5Executable(): File {
         val candidates = listOf(
             File(prefix, "drive_c/Program Files/MetaTrader 5/terminal64.exe"),
