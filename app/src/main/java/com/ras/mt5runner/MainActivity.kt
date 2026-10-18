@@ -27,6 +27,7 @@ class MainActivity : Activity() {
     private val logs = mutableListOf<String>()
     private val installerRequest = 5105
     private val exportLogsRequest = 5106
+    private val runtimeBundleRequest = 5107
     private val preferences by lazy { getSharedPreferences("runner_settings", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,6 +58,10 @@ class MainActivity : Activity() {
         root.addView(Button(this).apply {
             text = "MT5 ইনস্টলার নির্বাচন করুন"
             setOnClickListener { chooseInstaller() }
+        }, params())
+        root.addView(Button(this).apply {
+            text = "Wine + Box64 runtime bundle ইনস্টল করুন"
+            setOnClickListener { chooseRuntimeBundle() }
         }, params())
         root.addView(Button(this).apply {
             text = "অফিসিয়াল MT5 ডাউনলোড পেজ খুলুন"
@@ -118,6 +123,14 @@ class MainActivity : Activity() {
         refreshRuntimeStatus()
     }
 
+    private fun chooseRuntimeBundle() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/x-xz"
+        }
+        startActivityForResult(intent, runtimeBundleRequest)
+    }
+
     private fun chooseInstaller() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
@@ -158,6 +171,23 @@ class MainActivity : Activity() {
                     refreshRuntimeStatus()
                 } catch (e: Exception) {
                     addLog("ইনস্টলার প্রস্তুত করা ব্যর্থ: ${e.message}")
+                }
+            }
+            runtimeBundleRequest -> {
+                val archive = java.io.File(filesDir, "runtime-bundle-candidate.tar.xz")
+                try {
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        archive.outputStream().use { output -> input.copyTo(output) }
+                    } ?: throw IllegalStateException("Runtime archive পড়া যায়নি")
+                    addLog("Runtime archive কপি হয়েছে; নিরাপদ extraction শুরু")
+                    val installed = RuntimeBundleInstaller(this).install(archive)
+                    addLog("Runtime bundle app-private storage-এ extract হয়েছে: ${installed.absolutePath}")
+                    addLog("নোট: bundle extraction সফল হওয়া Android/Wine/MT5 compatibility প্রমাণ করে না")
+                    refreshRuntimeStatus()
+                } catch (e: Exception) {
+                    addLog("Runtime bundle install ব্যর্থ: ${e.message}")
+                } finally {
+                    archive.delete()
                 }
             }
             exportLogsRequest -> {
