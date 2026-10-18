@@ -129,7 +129,6 @@ jobs:
             apt-get clean
             rm -rf /var/lib/apt/lists/*
           '
-          sudo cp rootfs-arm64/rootfs-apt-packages.txt rootfs-arm64/rootfs-apt-packages.txt
           sudo chown -R "$USER":"$USER" rootfs-arm64
           file rootfs-arm64/usr/local/bin/box64 | tee arm64-rootfs-box64-file.txt
           readelf -h rootfs-arm64/usr/local/bin/box64 | tee arm64-rootfs-box64-elf.txt
@@ -280,25 +279,35 @@ jobs:
         with:
           name: runtime-bundle-candidate
           path: build
-      - name: Extract candidate and run basic emulation smoke test
+      - name: Install host PRoot
+        run: sudo apt-get update && sudo apt-get install -y proot
+      - name: Extract candidate and run Box64/Wine PE smoke tests in dual-rootfs layout
         shell: bash
         run: |
           set -Eeuo pipefail
           tar -xJf build/runtime-bundle-candidate.tar.xz
-          test -x bundle/bin/box64
-          ./bundle/bin/box64 --version 2>&1 | tee box64-smoke-version.txt
-          export BOX64_LD_LIBRARY_PATH="$PWD/bundle/rootfs/lib/x86_64-linux-gnu:$PWD/bundle/rootfs/usr/lib/x86_64-linux-gnu:$PWD/bundle/rootfs/lib64:$PWD/bundle/rootfs/opt/wine-11.0-wow64/lib"
-          export BOX64_LOG=1
-          export WINEPREFIX="$PWD/wine-smoke-prefix"
-          export WINEDEBUG=-all
-          wine_bin="$PWD/bundle/rootfs/opt/wine-11.0-wow64/bin/wine"
-          wineboot_bin="$PWD/bundle/rootfs/opt/wine-11.0-wow64/bin/wineboot"
-          ./bundle/bin/box64 "$wine_bin" --version 2>&1 | tee wine-under-box64-smoke.txt
+          test -x bundle/rootfs-arm64/usr/local/bin/box64
+          mkdir -p wine-smoke-prefix
+          host_rootfs="$PWD/bundle/rootfs-arm64"
+          wine_rootfs="$PWD/bundle/rootfs"
+          fixtures="$PWD/provenance/test-fixtures"
+          proot_run() {
+            proot -R "$host_rootfs" \
+              -b "$wine_rootfs:/x86root" \
+              -b "$fixtures:/tests" \
+              -b "$PWD/wine-smoke-prefix:/wineprefix" \
+              /usr/bin/env \
+              BOX64_LD_LIBRARY_PATH=/x86root/lib/x86_64-linux-gnu:/x86root/usr/lib/x86_64-linux-gnu:/x86root/lib64:/x86root/opt/wine-11.0-wow64/lib \
+              WINEPREFIX=/wineprefix WINEDEBUG=-all \
+              /usr/local/bin/box64 "$@"
+          }
+          proot_run --version 2>&1 | tee box64-smoke-version.txt
+          proot_run /x86root/opt/wine-11.0-wow64/bin/wine --version 2>&1 | tee wine-under-box64-smoke.txt
           grep -q 'wine-11.0' wine-under-box64-smoke.txt
-          timeout 180s ./bundle/bin/box64 "$wineboot_bin" --init 2>&1 | tee wineboot-smoke.txt
-          ./bundle/bin/box64 "$wine_bin" "$PWD/provenance/test-fixtures/runtime-smoke-x86_64.exe" 2>&1 | tee pe-x86_64-smoke.txt
+          timeout 180s proot_run /x86root/opt/wine-11.0-wow64/bin/wineboot --init 2>&1 | tee wineboot-smoke.txt
+          proot_run /x86root/opt/wine-11.0-wow64/bin/wine /tests/runtime-smoke-x86_64.exe 2>&1 | tee pe-x86_64-smoke.txt
           grep -q 'RUNTIME_SMOKE_OK pointer_bits=64' pe-x86_64-smoke.txt
-          ./bundle/bin/box64 "$wine_bin" "$PWD/provenance/test-fixtures/runtime-smoke-i386.exe" 2>&1 | tee pe-i386-smoke.txt
+          proot_run /x86root/opt/wine-11.0-wow64/bin/wine /tests/runtime-smoke-i386.exe 2>&1 | tee pe-i386-smoke.txt
           grep -q 'RUNTIME_SMOKE_OK pointer_bits=32' pe-i386-smoke.txt
           sha256sum box64-smoke-version.txt wine-under-box64-smoke.txt wineboot-smoke.txt pe-x86_64-smoke.txt pe-i386-smoke.txt > runtime-smoke.sha256
       - name: Upload ARM64 smoke-test evidence
