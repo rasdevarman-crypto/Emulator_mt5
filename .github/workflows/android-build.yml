@@ -12,7 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate shell syntax
-        run: bash -n scripts/check-runtime-bundle.sh scripts/verify-runtime-provenance.sh
+        run: |
+          bash -n scripts/check-runtime-bundle.sh
+          bash -n scripts/verify-runtime-provenance.sh
       - name: Validate example manifest JSON
         run: jq empty runtime/runtime-manifest.example.json
       - name: Confirm empty bundle is reported as not ready
