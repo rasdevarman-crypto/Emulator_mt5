@@ -196,7 +196,7 @@ jobs:
             if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
               sed -i "s/Components: main/Components: main universe/" /etc/apt/sources.list.d/ubuntu.sources
             else
-              sed -i 's/ main$/ main universe/' /etc/apt/sources.list
+              sed -i "s/ main$/ main universe/" /etc/apt/sources.list
             fi
             apt-get update
             apt-get install -y --no-install-recommends ca-certificates file libc-bin libasound2t64 libasound2-plugins libpulse0 libx11-6 libxext6 libxrender1 libxrandr2 libxi6 libxfixes3 libxcursor1 libxinerama1 libxkbcommon0 libgl1 libvulkan1 libfontconfig1 libfreetype6 libdbus-1-3 libgnutls30t64 libgphoto2-6t64 libldap2 libmpg123-0t64 libopenal1 libpcap0.8t64 libsane1 libudev1 libunwind8 libusb-1.0-0 libv4l-0 libxcomposite1 libxdamage1 libxkbfile1 libxml2 libxslt1.1 libxxf86vm1 zlib1g libgcc-s1 libstdc++6 libncurses6 libtinfo6 libfaudio0 libvkd3d1 libvkd3d-shader1
