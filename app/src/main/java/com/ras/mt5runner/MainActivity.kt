@@ -77,7 +77,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 try {
                     val process = runtimeManager.launchMt5 { line -> runOnUiThread { addLog("Wine: $line") } }
-                    addLog("MT5 process শুরু হয়েছে; GUI/ডিভাইস সামঞ্জস্য এখনো যাচাই হয়নি (PID ${process.pid()})")
+                    addLog("MT5 process শুরু হয়েছে; GUI/ডিভাইস সামঞ্জস্য এখনো যাচাই হয়নি")
                 } catch (e: Exception) {
                     addLog("MT5 চালু করা যায়নি: ${e.message}")
                     refreshRuntimeStatus()
@@ -151,7 +151,7 @@ class MainActivity : Activity() {
                     val check = runtimeManager.preflight()
                     if (check.ready) {
                         val process = runtimeManager.launchInstaller(destination) { line -> runOnUiThread { addLog("Wine: $line") } }
-                        addLog("Wine installer process শুরু হয়েছে (PID ${process.pid()}); GUI/display এখনো যাচাই হয়নি")
+                        addLog("Wine installer process শুরু হয়েছে; GUI/display এখনো যাচাই হয়নি")
                     } else {
                         addLog("ইনস্টলার এখনো চালানো হয়নি: ${check.message}")
                     }
