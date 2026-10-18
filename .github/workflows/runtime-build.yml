@@ -130,7 +130,6 @@ jobs:
             apt-get clean
             rm -rf /var/lib/apt/lists/*
           '
-          sudo chown -R "$USER":"$USER" rootfs-arm64
           file rootfs-arm64/usr/local/bin/box64 | tee arm64-rootfs-box64-file.txt
           readelf -h rootfs-arm64/usr/local/bin/box64 | tee arm64-rootfs-box64-elf.txt
           grep -q AArch64 arm64-rootfs-box64-elf.txt
@@ -218,7 +217,6 @@ jobs:
           mkdir -p bundle/provenance
           cp provenance/rootfs-apt-packages.txt bundle/provenance/rootfs-apt-packages.txt
           sudo rm bundle/rootfs/tmp/runtime-apt-packages.txt
-          sudo chown -R "$USER":"$USER" bundle/rootfs
           mkdir -p bundle/rootfs/opt
           ln -s ../rootfs/opt/wine-11.0-wow64/bin/wine bundle/bin/wine
           cp build/runtime-sources/source-audit.json provenance/source-audit.json
