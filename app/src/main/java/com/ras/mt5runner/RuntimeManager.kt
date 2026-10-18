@@ -18,7 +18,7 @@ import java.io.File
 class RuntimeManager(context: Context) {
     private val appContext = context.applicationContext
     private val runtimeDir = File(appContext.filesDir, "runtime")
-    private val proot = File(runtimeDir, "bin/proot")
+    private val proot = File(runtimeDir, "proot/bin/proot")
     private val bundle = File(runtimeDir, "bundle")
     private val hostRoot = File(bundle, "rootfs-arm64")
     private val wineRoot = File(bundle, "rootfs")
@@ -30,6 +30,11 @@ class RuntimeManager(context: Context) {
 
     fun preflight(): Preflight {
         val missing = mutableListOf<String>()
+        try {
+            ensureBundledProot()
+        } catch (e: Exception) {
+            missing += "Bundled Android PRoot could not be installed: ${e.message}"
+        }
         if (!proot.isFile || !proot.canExecute()) missing += "Android-native PRoot executable missing: ${proot.path}"
         if (!box64.isFile || !box64.canExecute()) missing += "Box64 binary missing: ${box64.path}"
         if (!File(hostRoot, "etc/os-release").isFile) missing += "ARM64 host rootfs incomplete"
@@ -55,6 +60,7 @@ class RuntimeManager(context: Context) {
             "-b", "${wineRoot.absolutePath}:/x86root",
             "-b", "${prefix.absolutePath}:/wineprefix",
             "-b", "${installer.absolutePath}:/installer.exe",
+            "-b", "/dev", "-b", "/proc", "--link2symlink", "-p", "-L",
             "/usr/bin/env",
             "BOX64_LD_LIBRARY_PATH=$ldPath",
             "WINEPREFIX=/wineprefix",
@@ -88,6 +94,7 @@ class RuntimeManager(context: Context) {
             proot.absolutePath, "-r", hostRoot.absolutePath,
             "-b", "${wineRoot.absolutePath}:/x86root",
             "-b", "${prefix.absolutePath}:/wineprefix",
+            "-b", "/dev", "-b", "/proc", "--link2symlink", "-p", "-L",
             "/usr/bin/env",
             "BOX64_LD_LIBRARY_PATH=$ldPath",
             "WINEPREFIX=/wineprefix",
@@ -113,6 +120,44 @@ class RuntimeManager(context: Context) {
         )
         return candidates.firstOrNull { it.isFile }
             ?: throw IllegalStateException("MT5 executable not found in Wine prefix. Run the official installer first.")
+    }
+
+
+    private fun ensureBundledProot() {
+        val destination = File(runtimeDir, "proot")
+        val marker = File(destination, ".asset-installed")
+        if (marker.isFile && proot.isFile && proot.canExecute()) return
+        val entries = appContext.assets.list("runtime/proot")
+            ?: throw IllegalStateException("APK has no runtime/proot assets")
+        if (entries.isEmpty()) throw IllegalStateException("APK has no bundled PRoot files")
+        if (destination.exists()) destination.deleteRecursively()
+        copyAssetTree("runtime/proot", destination)
+        if (!proot.setExecutable(true, false) && !proot.canExecute()) {
+            throw IllegalStateException("Could not mark bundled PRoot executable")
+        }
+        marker.writeText("source=APK asset; Android arm64 PRoot candidate")
+    }
+
+    private fun copyAssetTree(assetPath: String, destination: File) {
+        val children = appContext.assets.list(assetPath) ?: emptyArray()
+        if (children.isNotEmpty()) {
+            if (!destination.exists() && !destination.mkdirs()) {
+                throw IllegalStateException("Could not create ${destination.path}")
+            }
+            children.forEach { child ->
+                copyAssetTree("$assetPath/$child", File(destination, child))
+            }
+        } else {
+            destination.parentFile?.let { if (!it.exists() && !it.mkdirs()) {
+                throw IllegalStateException("Could not create ${it.path}")
+            } }
+            appContext.assets.open(assetPath).use { input ->
+                destination.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (destination.name in setOf("proot", "proot-userland", "loader", "loader32")) {
+                destination.setExecutable(true, false)
+            }
+        }
     }
 
     fun pathsSummary(): String = listOf(
