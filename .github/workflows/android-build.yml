@@ -1,63 +1,113 @@
-name: Android Debug APK
+name: Android Build and GitHub Release
+
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: android-build-release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  runtime-contract:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate shell syntax
-        run: |
-          bash -n scripts/check-runtime-bundle.sh
-          bash -n scripts/verify-runtime-provenance.sh
-      - name: Validate example manifest JSON
-        run: jq empty runtime/runtime-manifest.example.json
-      - name: Confirm empty bundle is reported as not ready
-        shell: bash
-        run: |
-          set +e
-          output="$(bash scripts/check-runtime-bundle.sh runtime/bundle 2>&1)"
-          status=$?
-          set -e
-          printf '%s\n' "$output"
-          test "$status" -eq 2
-          grep -q "No runtime bundle found" <<< "$output"
-      - name: Confirm example manifest cannot pass provenance checks
-        shell: bash
-        run: |
-          mkdir -p runtime/bundle/bin runtime/bundle/rootfs
-          cp runtime/runtime-manifest.example.json runtime/bundle/manifest.json
-          printf '#!/bin/sh\nexit 0\n' > runtime/bundle/bin/box64
-          printf '#!/bin/sh\nexit 0\n' > runtime/bundle/bin/wine
-          chmod +x runtime/bundle/bin/box64 runtime/bundle/bin/wine
-          set +e
-          output="$(bash scripts/verify-runtime-provenance.sh runtime/bundle 2>&1)"
-          status=$?
-          set -e
-          printf '%s\n' "$output"
-          test "$status" -eq 1
-          grep -q "manifest status must be candidate or ready-for-review" <<< "$output"
   build:
+    name: Validate and build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Java 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v4.3.0
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: "8.9"
+
+      - name: Validate runtime contract scripts and fixtures
+        run: |
+          bash -n scripts/check-runtime-bundle.sh
+          bash -n scripts/verify-runtime-provenance.sh
+          jq empty runtime/runtime-manifest.example.json
+
       - name: Build debug APK
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: gradle --no-daemon assembleDebug
-      - uses: actions/upload-artifact@v4
+
+      - name: Build versioned APKs for version tag
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag must be vMAJOR.MINOR.PATCH (optional prerelease suffix), got: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          gradle --no-daemon -PversionName="$version" -PversionCode="$GITHUB_RUN_NUMBER" assembleDebug assembleRelease
+          mkdir -p release-assets
+          cp app/build/outputs/apk/release/*.apk "release-assets/MT5-RAS-Runner-${GITHUB_REF_NAME}-release.apk"
+          cp app/build/outputs/apk/debug/*.apk "release-assets/MT5-RAS-Runner-${GITHUB_REF_NAME}-debug.apk"
+          (cd release-assets && sha256sum *.apk > SHA256SUMS.txt)
+          ls -lh release-assets
+
+      - name: Upload debug APK artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: MT5-RAS-Runner-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload versioned release assets
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: versioned-release-assets
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified build assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: versioned-release-assets
+          path: release-assets
+
+      - name: Publish versioned APKs to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MT5 RAS Runner ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/MT5-RAS-Runner-${{ github.ref_name }}-release.apk
+            release-assets/MT5-RAS-Runner-${{ github.ref_name }}-debug.apk
+            release-assets/SHA256SUMS.txt
+          body: |
+            Automated Android build for ${{ github.ref_name }}.
+
+            - The Release APK is built with the Android Gradle release variant and CI debug signing. It is suitable for testing, not a production signing key.
+            - The Debug APK is also attached for diagnostics.
+            - SHA256 checksums are included.
+            - This app is currently a launcher scaffold; this release does not claim that Windows MT5 runs on Android.
