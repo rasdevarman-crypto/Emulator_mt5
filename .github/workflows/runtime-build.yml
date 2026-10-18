@@ -194,7 +194,7 @@ jobs:
           sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
             export DEBIAN_FRONTEND=noninteractive
             if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
-              sed -i 's/Components: main/Components: main universe/' /etc/apt/sources.list.d/ubuntu.sources
+              sed -i "s/Components: main/Components: main universe/" /etc/apt/sources.list.d/ubuntu.sources
             else
               sed -i 's/ main$/ main universe/' /etc/apt/sources.list
             fi
