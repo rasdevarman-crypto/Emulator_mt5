@@ -1,0 +1,154 @@
+name: Experimental Wine WoW64 + Box64 Build
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "scripts/acquire-runtime-sources.sh"
+      - ".github/workflows/runtime-build.yml"
+permissions:
+  contents: read
+concurrency:
+  group: runtime-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BOX64_COMMIT: "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
+  WINE_VERSION: "11.0"
+  WINE_SHA256: "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
+
+jobs:
+  acquire:
+    name: Verify pinned source inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install source audit tools
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Acquire and verify source inputs
+        run: |
+          bash -n scripts/acquire-runtime-sources.sh
+          bash scripts/acquire-runtime-sources.sh build/runtime-sources
+          jq empty build/runtime-sources/source-audit.json
+          test "$(jq -r '.box64.commit' build/runtime-sources/source-audit.json)" = "$BOX64_COMMIT"
+          test "$(jq -r '.wine.version' build/runtime-sources/source-audit.json)" = "$WINE_VERSION"
+          test "$(jq -r '.wine.source_archive_sha256' build/runtime-sources/source-audit.json)" = "$WINE_SHA256"
+      - name: Upload verified source inputs
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: pinned-runtime-sources
+          path: |
+            build/runtime-sources/source-audit.json
+            build/runtime-sources/wine-11.0.tar.xz
+            build/runtime-sources/box64/
+            !build/runtime-sources/box64/.git/**
+          if-no-files-found: error
+          retention-days: 7
+
+  build-box64:
+    name: Build Box64 for ARM64 glibc Linux
+    needs: acquire
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pinned-runtime-sources
+          path: build/runtime-sources
+      - name: Install Box64 build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libcapstone-dev libepoxy-dev libx11-dev libxext-dev libxfixes-dev libxrender-dev libxrandr-dev libxi-dev libxinerama-dev libxcursor-dev libxkbcommon-dev libvulkan-dev file binutils
+      - name: Configure, compile, and verify ARM64 Box64
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build/box64-build logs/box64 stage/box64
+          git -C build/runtime-sources/box64 rev-parse HEAD | tee logs/box64/source-commit.txt
+          test "$(git -C build/runtime-sources/box64 rev-parse HEAD)" = "$BOX64_COMMIT"
+          cmake -S build/runtime-sources/box64 -B build/box64-build \
+            -DARM_DYNAREC=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+            2>&1 | tee logs/box64/configure.log
+          cmake --build build/box64-build --parallel 2 2>&1 | tee logs/box64/build.log
+          DESTDIR="$PWD/stage/box64" cmake --install build/box64-build 2>&1 | tee logs/box64/install.log
+          box64_bin="stage/box64/usr/local/bin/box64"
+          test -x "$box64_bin"
+          file "$box64_bin" | tee logs/box64/file.txt
+          readelf -h "$box64_bin" | tee logs/box64/elf-header.txt
+          grep -q 'AArch64' logs/box64/elf-header.txt
+          "$box64_bin" --version 2>&1 | tee logs/box64/version.txt
+          dpkg-query -W -f='${binary:Package}=${Version}\n' | sort > logs/box64/apt-packages.txt
+          { cmake --version; gcc --version; git -C build/runtime-sources/box64 rev-parse HEAD; } > logs/box64/toolchain.txt
+          tar -cJf box64-arm64-install-tree.tar.xz -C stage/box64 usr/local
+          sha256sum box64-arm64-install-tree.tar.xz > box64-arm64-install-tree.tar.xz.sha256
+      - name: Upload Box64 build output and logs
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: box64-arm64-build-output
+          path: |
+            box64-arm64-install-tree.tar.xz
+            box64-arm64-install-tree.tar.xz.sha256
+            logs/box64/
+          if-no-files-found: warn
+          retention-days: 7
+
+  build-wine:
+    name: Build Wine 11.0 new WoW64 for x86_64 Linux
+    needs: acquire
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pinned-runtime-sources
+          path: build/runtime-sources
+      - name: Verify Wine source archive
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "$WINE_SHA256  build/runtime-sources/wine-11.0.tar.xz" | sha256sum --check
+          mkdir -p build/wine-source
+          tar -xJf build/runtime-sources/wine-11.0.tar.xz --strip-components=1 -C build/wine-source
+          grep -Fxq 'Wine version 11.0' build/wine-source/VERSION
+      - name: Install Wine and MinGW build dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update
+          sudo apt-get build-dep -y wine
+          sudo apt-get install -y gcc-mingw-w64-i686 g++-mingw-w64-i686 gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 pkg-config file binutils xz-utils
+          mkdir -p logs/wine
+          dpkg-query -W -f='${binary:Package}=${Version}\n' | sort > logs/wine/apt-packages.txt
+          { gcc --version; make --version; i686-w64-mingw32-gcc --version; x86_64-w64-mingw32-gcc --version; } > logs/wine/toolchain.txt
+      - name: Configure and compile new WoW64 Wine
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p stage/wine
+          cd build/wine-source
+          ./configure --enable-archs=i386,x86_64 --prefix=/opt/wine-11.0-wow64 \
+            2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/configure.log"
+          grep -Eq '^PE_ARCHS = .*i386.*x86_64' Makefile
+          make -j2 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/build.log"
+          make install DESTDIR="$GITHUB_WORKSPACE/stage/wine" 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/install.log"
+          wine_bin="$GITHUB_WORKSPACE/stage/wine/opt/wine-11.0-wow64/bin/wine"
+          test -x "$wine_bin"
+          "$wine_bin" --version 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/version.txt"
+          file "$wine_bin" | tee "$GITHUB_WORKSPACE/logs/wine/file.txt"
+          tar -cJf "$GITHUB_WORKSPACE/wine-11.0-wow64-x86_64-install-tree.tar.xz" -C "$GITHUB_WORKSPACE/stage/wine" opt/wine-11.0-wow64
+          cd "$GITHUB_WORKSPACE"
+          sha256sum wine-11.0-wow64-x86_64-install-tree.tar.xz > wine-11.0-wow64-x86_64-install-tree.tar.xz.sha256
+      - name: Upload Wine build output and logs
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: wine-11.0-wow64-x86_64-build-output
+          path: |
+            wine-11.0-wow64-x86_64-install-tree.tar.xz
+            wine-11.0-wow64-x86_64-install-tree.tar.xz.sha256
+            logs/wine/
+          if-no-files-found: warn
+          retention-days: 7
