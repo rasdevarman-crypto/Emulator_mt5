@@ -56,10 +56,19 @@ class RuntimeBundleInstaller(context: Context) {
                             } else if (entry.isSymbolicLink) {
                                 output.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Could not create symlink parent") }
                                 val link = Paths.get(entry.linkName)
-                                require(!link.isAbsolute) { "Absolute symlink is not allowed in runtime bundle" }
-                                val resolved = output.toPath().parent.resolve(link).normalize()
+                                // Rootfs absolute links must resolve inside the guest root, not Android's /
+                                val resolved = if (link.isAbsolute) {
+                                    rootPath.resolve(link.toString().trimStart('/')).normalize()
+                                } else {
+                                    output.toPath().parent.resolve(link).normalize()
+                                }
                                 require(resolved.startsWith(rootPath)) { "Symlink escapes runtime bundle" }
-                                Os.symlink(entry.linkName, output.absolutePath)
+                                val safeLink = if (link.isAbsolute) {
+                                    output.toPath().parent.relativize(resolved).toString()
+                                } else {
+                                    link.toString()
+                                }
+                                Os.symlink(safeLink, output.absolutePath)
                             } else if (entry.isFile) {
                                 totalBytes += entry.size
                                 require(totalBytes <= maxExpandedBytes) { "Runtime archive exceeds expanded size limit" }
