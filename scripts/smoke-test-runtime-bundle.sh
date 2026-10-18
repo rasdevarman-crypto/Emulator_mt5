@@ -34,7 +34,7 @@ proot_run() {
 }
 
 proot_run --version
-proot_run /x86root/opt/wine-11.0-wow64/bin/wine --version | grep -F 'wine-11.0'
+proot_run /x86root/opt/wine-11.0-wow64/bin/wine --version 2>&1 | grep -F 'wine-11.0'
 proot_run /x86root/opt/wine-11.0-wow64/bin/wineboot --init
 proot_run /x86root/opt/wine-11.0-wow64/bin/wine /tests/runtime-smoke-x86_64.exe | tee "$base_dir/pe-x86_64-smoke.txt"
 grep -F 'RUNTIME_SMOKE_OK pointer_bits=64' "$base_dir/pe-x86_64-smoke.txt"
