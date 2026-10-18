@@ -1,0 +1,41 @@
+name: Runtime Source Acquisition Audit
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "scripts/acquire-runtime-sources.sh"
+      - ".github/workflows/runtime-source-audit.yml"
+      - "docs/WINE_BOX64_SOURCE_STRATEGY.md"
+permissions:
+  contents: read
+jobs:
+  acquire-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate acquisition script syntax
+        run: bash -n scripts/acquire-runtime-sources.sh
+      - name: Acquire pinned upstream source trees
+        run: bash scripts/acquire-runtime-sources.sh build/runtime-sources
+      - name: Validate source audit JSON and pin values
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq empty build/runtime-sources/source-audit.json
+          test "$(jq -r '.status' build/runtime-sources/source-audit.json)" = "sources-acquired-not-built"
+          test "$(jq -r '.box64.commit' build/runtime-sources/source-audit.json)" = "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
+          test "$(jq -r '.wine.version' build/runtime-sources/source-audit.json)" = "11.0"
+          test "$(jq -r '.wine.source_archive_sha256' build/runtime-sources/source-audit.json | grep -Ec '^[a-f0-9]{64}$')" = "1"
+      - name: Upload acquired source inputs and audit (not runtime binaries)
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-source-inputs
+          path: |
+            build/runtime-sources/source-audit.json
+            build/runtime-sources/wine-11.0.tar.xz
+            build/runtime-sources/box64/
+            !build/runtime-sources/box64/.git/**
+          if-no-files-found: error
+          retention-days: 7
