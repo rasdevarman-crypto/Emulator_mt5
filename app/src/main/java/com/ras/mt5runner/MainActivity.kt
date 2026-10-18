@@ -21,6 +21,9 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var logsView: TextView
     private lateinit var keepScreenOn: CheckBox
+    private lateinit var launchMt5Button: Button
+    private lateinit var runtimeManager: RuntimeManager
+    private var selectedInstaller: java.io.File? = null
     private val logs = mutableListOf<String>()
     private val installerRequest = 5105
     private val exportLogsRequest = 5106
@@ -29,6 +32,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadSavedLogs()
+        runtimeManager = RuntimeManager(this)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -64,10 +68,23 @@ class MainActivity : Activity() {
             }
         }, params())
         root.addView(Button(this).apply {
+            text = "রানটাইম পরীক্ষা করুন"
+            setOnClickListener { refreshRuntimeStatus() }
+        }, params())
+        launchMt5Button = Button(this).apply {
             text = "MT5 চালু করুন"
             isEnabled = false
-            setOnClickListener { addLog("MT5 চালু করা যায়নি: Wine/Box64 রানটাইম যুক্ত নেই") }
-        }, params())
+            setOnClickListener {
+                try {
+                    val process = runtimeManager.launchMt5 { line -> runOnUiThread { addLog("Wine: $line") } }
+                    addLog("MT5 process শুরু হয়েছে; GUI/ডিভাইস সামঞ্জস্য এখনো যাচাই হয়নি (PID ${process.pid()})")
+                } catch (e: Exception) {
+                    addLog("MT5 চালু করা যায়নি: ${e.message}")
+                    refreshRuntimeStatus()
+                }
+            }
+        }
+        root.addView(launchMt5Button, params())
 
         root.addView(TextView(this).apply {
             text = "সেটিংস"; textSize = 18f
@@ -97,7 +114,8 @@ class MainActivity : Activity() {
         root.addView(ScrollView(this).apply { addView(logsView) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
-        addLog("অ্যাপ চালু হয়েছে; Wine/Box64 ও MT5 রানটাইম এখনো সংযুক্ত বা যাচাই করা হয়নি।")
+        addLog("অ্যাপ চালু হয়েছে; প্রাইভেট runtime staging এবং Android-native PRoot এখনো প্রয়োজন।")
+        refreshRuntimeStatus()
     }
 
     private fun chooseInstaller() {
@@ -123,9 +141,24 @@ class MainActivity : Activity() {
         val uri = data?.data ?: return
         when (requestCode) {
             installerRequest -> {
-                status.text = "অবস্থা: ইনস্টলার ফাইল নির্বাচন করা হয়েছে; ইনস্টলেশন যাচাই হয়নি"
-                addLog("ইনস্টলার নির্বাচন করা হয়েছে: ${uri.lastPathSegment ?: "ফাইল"}")
-                Toast.makeText(this, "ফাইল নির্বাচন হয়েছে; MT5 ইনস্টলেশন এখনো বাস্তবায়িত নয়", Toast.LENGTH_LONG).show()
+                try {
+                    val destination = java.io.File(filesDir, "mt5-installer.exe")
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        destination.outputStream().use { output -> input.copyTo(output) }
+                    } ?: throw IllegalStateException("ইনস্টলার ফাইল পড়া যায়নি")
+                    selectedInstaller = destination
+                    addLog("ইনস্টলার app-private storage-এ কপি হয়েছে: ${destination.name}")
+                    val check = runtimeManager.preflight()
+                    if (check.ready) {
+                        val process = runtimeManager.launchInstaller(destination) { line -> runOnUiThread { addLog("Wine: $line") } }
+                        addLog("Wine installer process শুরু হয়েছে (PID ${process.pid()}); GUI/display এখনো যাচাই হয়নি")
+                    } else {
+                        addLog("ইনস্টলার এখনো চালানো হয়নি: ${check.message}")
+                    }
+                    refreshRuntimeStatus()
+                } catch (e: Exception) {
+                    addLog("ইনস্টলার প্রস্তুত করা ব্যর্থ: ${e.message}")
+                }
             }
             exportLogsRequest -> {
                 try {
@@ -139,6 +172,20 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+
+    private fun refreshRuntimeStatus() {
+        val check = runtimeManager.preflight()
+        status.text = if (check.ready) {
+            "অবস্থা: runtime ফাইল পাওয়া গেছে; Android GUI/MT5 যাচাই বাকি"
+        } else {
+            "অবস্থা: runtime প্রস্তুত নয় — ${check.message}"
+        }
+        val mt5Exists = try { runtimeManager.mt5Executable().isFile } catch (_: Exception) { false }
+        launchMt5Button.isEnabled = check.ready && mt5Exists
+        if (!check.ready) addLog("Runtime preflight: ${check.message}")
+        else if (!mt5Exists) addLog("Runtime preflight: MT5 terminal.exe এখনো Wine prefix-এ পাওয়া যায়নি")
     }
 
     private fun applyKeepScreenOn(enabled: Boolean) {
