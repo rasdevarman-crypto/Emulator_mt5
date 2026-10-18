@@ -40,8 +40,14 @@ jobs:
           bash -n scripts/verify-runtime-provenance.sh
           jq empty runtime/runtime-manifest.example.json
 
-      - name: Set up Android SDK and NDK for native PRoot
-        uses: android-actions/setup-android@v3
+      - name: Set up Android NDK for native PRoot
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sdkmanager_bin="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort | tail -n1)"
+          test -x "$sdkmanager_bin"
+          yes | "$sdkmanager_bin" --licenses >/dev/null
+          "$sdkmanager_bin" --install "ndk;23.2.8568313"
 
       - name: Build pinned Android-native PRoot
         shell: bash
