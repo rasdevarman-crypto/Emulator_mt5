@@ -22,12 +22,17 @@ class RuntimeBundleInstaller(context: Context) {
         require(archive.isFile && archive.canRead()) { "Runtime archive is not readable" }
         val runtimeDir = File(context.filesDir, "runtime")
         val target = File(runtimeDir, "bundle")
+        val staging = File(runtimeDir, "bundle.installing")
+        val backup = File(runtimeDir, "bundle.previous")
         runtimeDir.mkdirs()
-        if (target.exists() && !target.deleteRecursively()) {
-            throw IllegalStateException("Could not clear old runtime bundle")
+        if (staging.exists() && !staging.deleteRecursively()) {
+            throw IllegalStateException("Could not clear incomplete runtime staging directory")
         }
-        if (!target.mkdirs()) throw IllegalStateException("Could not create runtime directory")
-        val rootPath = target.absoluteFile.toPath().normalize()
+        if (backup.exists() && !backup.deleteRecursively()) {
+            throw IllegalStateException("Could not clear stale runtime backup")
+        }
+        if (!staging.mkdirs()) throw IllegalStateException("Could not create runtime staging directory")
+        val rootPath = staging.absoluteFile.toPath().normalize()
         var totalBytes = 0L
         var entriesSeen = 0
 
@@ -47,7 +52,7 @@ class RuntimeBundleInstaller(context: Context) {
                             require(!relativePath.isAbsolute && !relativePath.startsWith("..")) {
                                 "Unsafe path in runtime archive"
                             }
-                            val destination = target.toPath().resolve(relativePath).normalize()
+                            val destination = staging.toPath().resolve(relativePath).normalize()
                             require(destination.startsWith(rootPath)) { "Runtime entry escapes bundle directory" }
                             val output = destination.toFile()
 
@@ -80,14 +85,23 @@ class RuntimeBundleInstaller(context: Context) {
                     }
                 }
             }
-            require(File(target, "manifest.json").isFile) { "Runtime bundle manifest is missing" }
-            require(File(target, "bin/box64").isFile) { "Box64 executable is missing" }
-            require(File(target, "rootfs-arm64/etc/os-release").isFile) { "ARM64 host rootfs is missing" }
-            require(File(target, "rootfs/etc/os-release").isFile) { "Wine rootfs is missing" }
-            require(File(target, "rootfs/opt/wine-11.0-wow64/bin/wine").isFile) { "Wine executable is missing" }
+            require(File(staging, "manifest.json").isFile) { "Runtime bundle manifest is missing" }
+            require(File(staging, "bin/box64").isFile) { "Box64 executable is missing" }
+            require(File(staging, "rootfs-arm64/etc/os-release").isFile) { "ARM64 host rootfs is missing" }
+            require(File(staging, "rootfs/etc/os-release").isFile) { "Wine rootfs is missing" }
+            require(File(staging, "rootfs/opt/wine-11.0-wow64/bin/wine").isFile) { "Wine executable is missing" }
+            if (target.exists() && !target.renameTo(backup)) {
+                throw IllegalStateException("Could not preserve the existing runtime bundle")
+            }
+            if (!staging.renameTo(target)) {
+                if (backup.exists()) backup.renameTo(target)
+                throw IllegalStateException("Could not atomically activate the new runtime bundle")
+            }
+            backup.deleteRecursively()
             return target
         } catch (e: Exception) {
-            target.deleteRecursively()
+            staging.deleteRecursively()
+            if (!target.exists() && backup.exists()) backup.renameTo(target)
             throw e
         }
     }
