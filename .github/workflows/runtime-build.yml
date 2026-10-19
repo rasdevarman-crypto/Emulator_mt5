@@ -274,15 +274,28 @@ jobs:
             }' > bundle/manifest.json
           bash scripts/check-runtime-bundle.sh bundle
           bash scripts/verify-runtime-provenance.sh bundle
-          # The runner has limited ephemeral disk. All build logs, fixtures and
-          # source audit data needed in the candidate have already been copied to
-          # provenance/ and bundle/, so discard downloaded/extracted intermediates
-          # before creating the large compressed candidate archive.
+          # Keep the runtime libraries and provenance, but remove Ubuntu package
+          # documentation/locales/cache that are not needed to run Box64 or Wine.
+          # This limits peak disk use when the rootfs and compressed archive coexist.
+          for root in bundle/rootfs bundle/rootfs-arm64; do
+            sudo rm -rf "$root/usr/share/doc" "$root/usr/share/man" "$root/usr/share/info" \
+              "$root/usr/share/lintian" "$root/usr/share/bug" "$root/usr/share/games" \
+              "$root/var/cache/apt/archives" "$root/var/lib/apt/lists" "$root/var/log/"*
+            if [[ -d "$root/usr/share/locale" ]]; then
+              sudo find "$root/usr/share/locale" -mindepth 1 -maxdepth 1 ! -name 'C' -exec rm -rf {} +
+            fi
+          done
+          # All required build logs, fixtures and source audit data are already in
+          # provenance/ and bundle/. Discard intermediates before compression.
           rm -rf build/wine-extract build/wine-output build/box64-output build/arm64-rootfs build/runtime-sources
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
+          du -sh bundle bundle/rootfs bundle/rootfs-arm64 | tee provenance/package-rootfs-size-before-archive.txt
           df -h "$PWD" | tee provenance/package-disk-space-before-archive.txt
-          sudo tar --numeric-owner -cJf runtime-bundle-candidate.tar.xz bundle provenance
+          # xz -3 lowers peak CPU/memory pressure while preserving .tar.xz format.
+          sudo tar --numeric-owner -cf - bundle provenance | xz -T0 -3 > runtime-bundle-candidate.tar.xz
+          test -s runtime-bundle-candidate.tar.xz
+          xz -t runtime-bundle-candidate.tar.xz
           sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256
       - name: Upload candidate bundle and provenance
         if: always()
