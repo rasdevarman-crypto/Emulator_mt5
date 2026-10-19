@@ -37,14 +37,14 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p "$RUNNER_TEMP/runtime-artifact" app/src/main/assets/runtime
-          gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" \\
+          gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name runtime-bundle-candidate --dir "$RUNNER_TEMP/runtime-artifact"
           cd "$RUNNER_TEMP/runtime-artifact"
           test -s runtime-bundle-candidate.tar.xz
           sha256sum -c runtime-bundle-candidate.tar.xz.sha256
           # Workflow_run only fires after the complete runtime workflow succeeds,
           # including its ARM64 smoke job. Keep the candidate archive unchanged in APK assets.
-          install -m 0644 runtime-bundle-candidate.tar.xz \\
+          install -m 0644 runtime-bundle-candidate.tar.xz \
             "$GITHUB_WORKSPACE/app/src/main/assets/runtime/runtime-bundle.tar.xz"
           cd "$GITHUB_WORKSPACE"
           sha256sum app/src/main/assets/runtime/runtime-bundle.tar.xz
