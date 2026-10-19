@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "status": "pending-runtime-build",
+  "target_android_abi": "arm64-v8a",
+  "wine_version": "11.0",
+  "box64_commit": "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a",
+  "archive_url": "",
+  "archive_sha256": "",
+  "archive_size_bytes": 0,
+  "verification": {
+    "pinned_sources": true,
+    "wine_build": false,
+    "bundle_checksum": false,
+    "arm64_smoke_test": false,
+    "physical_android_mt5_test": false
+  },
+  "notes": "Not verified and not downloadable. Publish archive metadata only after Wine build, archive checksum, and ARM64 runtime smoke tests succeed. Physical Android/MT5 compatibility requires separate device evidence."
+}
