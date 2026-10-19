@@ -188,9 +188,12 @@ jobs:
           rm -rf bundle/usr
           sudo debootstrap --variant=minbase noble bundle/rootfs http://archive.ubuntu.com/ubuntu/
           sudo cp build/wine-output/wine-11.0-wow64-x86_64-install-tree.tar.xz bundle/
-          sudo tar -xJf bundle/wine-11.0-wow64-x86_64-install-tree.tar.xz -C bundle/rootfs
-          sudo rm bundle/wine-11.0-wow64-x86_64-install-tree.tar.xz
+          wine_archive="bundle/wine-11.0-wow64-x86_64-install-tree.tar.xz"
+          # Validate the expected install-tree layout before modifying the rootfs.
+          sudo tar -tJf "$wine_archive" | grep -Fxq 'opt/wine-11.0-wow64/bin/wine'
           sudo install -m 0755 /bin/bash bundle/rootfs/bin/bash
+          # Install Ubuntu dependencies first. Extract the Wine tree afterwards so
+          # package setup cannot leave the Wine prefix missing before validation.
           sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
             export DEBIAN_FRONTEND=noninteractive
             if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
@@ -200,10 +203,15 @@ jobs:
             fi
             apt-get update
             apt-get install -y --no-install-recommends ca-certificates file libc-bin libasound2t64 libasound2-plugins libpulse0 libx11-6 libxext6 libxrender1 libxrandr2 libxi6 libxfixes3 libxcursor1 libxinerama1 libxkbcommon0 libgl1 libvulkan1 libfontconfig1 libfreetype6 libdbus-1-3 libgnutls30t64 libgphoto2-6t64 libldap2 libmpg123-0t64 libopenal1 libpcap0.8t64 libsane1 libudev1 libunwind8 libusb-1.0-0 libv4l-0 libxcomposite1 libxdamage1 libxkbfile1 libxml2 libxslt1.1 libxxf86vm1 zlib1g libgcc-s1 libstdc++6 libncurses6 libtinfo6 libfaudio0 libvkd3d1 libvkd3d-shader1
-            dpkg-query -W -f="\${binary:Package}=\${Version}\n" | sort > /tmp/runtime-apt-packages.txt
+            dpkg-query -W -f="\${binary:Package}=\${Version}\\n" | sort > /tmp/runtime-apt-packages.txt
+          '
+          sudo tar -xJf "$wine_archive" -C bundle/rootfs
+          sudo rm "$wine_archive"
+          sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
+            test -x /opt/wine-11.0-wow64/bin/wine
             # Wine Unix modules depend on sibling modules (e.g. crypt32.so -> ntdll.so).
             # ldd needs Wine's private module directories in its search path.
-            export LD_LIBRARY_PATH="/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/opt/wine-11.0-wow64/lib/wine/i386-unix:/opt/wine-11.0-wow64/lib:${LD_LIBRARY_PATH:-}"
+            export LD_LIBRARY_PATH="/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/opt/wine-11.0-wow64/lib/wine/i386-unix:/opt/wine-11.0-wow64/lib:\${LD_LIBRARY_PATH:-}"
             find /opt/wine-11.0-wow64 -type f -print0 | while IFS= read -r -d "" f; do
               if file "$f" | grep -q ELF; then
                 deps="$(ldd "$f" 2>&1 || true)"
