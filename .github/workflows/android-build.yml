@@ -107,9 +107,11 @@ jobs:
           retention-days: 14
 
   publish-release:
-    name: Publish GitHub Release
+    name: Publish GitHub Release (physical-device validation gated)
     needs: build
-    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' }}
+    # Fail closed: set repository Actions variable MT5_DEVICE_VALIDATION_PASSED=true
+    # only after reviewing evidence from a real ARM64 Android device and successful MT5 tests.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' && vars.MT5_DEVICE_VALIDATION_PASSED == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -132,9 +134,9 @@ jobs:
             release-assets/MT5-RAS-Runner-${{ github.ref_name }}-debug.apk
             release-assets/SHA256SUMS.txt
           body: |
-            Automated Android build for ${{ github.ref_name }}.
+            Android build for ${{ github.ref_name }}. GitHub Release publication is gated by the repository Actions variable `MT5_DEVICE_VALIDATION_PASSED=true`, which must only be set after real-device Wine/Box64/MT5 validation evidence has been reviewed.
 
-            - The Release APK is built with the Android Gradle release variant and CI debug signing. It is suitable for testing, not a production signing key.
-            - The Debug APK is also attached for diagnostics.
+            - APKs are built with the CI debug signing key and are test builds, not production-signed releases.
+            - The Debug APK is attached for diagnostics.
             - SHA256 checksums are included.
-            - This app is currently a launcher scaffold; this release does not claim that Windows MT5 runs on Android.
+            - Do not claim MT5 compatibility unless physical-device validation evidence is available.
