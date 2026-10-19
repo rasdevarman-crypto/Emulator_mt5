@@ -274,6 +274,14 @@ jobs:
             }' > bundle/manifest.json
           bash scripts/check-runtime-bundle.sh bundle
           bash scripts/verify-runtime-provenance.sh bundle
+          # The runner has limited ephemeral disk. All build logs, fixtures and
+          # source audit data needed in the candidate have already been copied to
+          # provenance/ and bundle/, so discard downloaded/extracted intermediates
+          # before creating the large compressed candidate archive.
+          rm -rf build/wine-extract build/wine-output build/box64-output build/arm64-rootfs build/runtime-sources
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h "$PWD" | tee provenance/package-disk-space-before-archive.txt
           sudo tar --numeric-owner -cJf runtime-bundle-candidate.tar.xz bundle provenance
           sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256
       - name: Upload candidate bundle and provenance
