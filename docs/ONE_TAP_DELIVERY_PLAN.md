@@ -1,34 +1,30 @@
-# One-tap delivery plan
+# One-tap delivery implementation plan
 
-## User experience goal
+## Delivery variants
 
-A user installs the APK, opens it, waits for automatic preparation, and taps **Launch MT5**. No manually browsing for archives, extracting files, typing shell commands, or editing configuration files should be required.
+- `allInOne`: bundles the exact validated `runtime-bundle-candidate.tar.xz` inside the app's assets. First launch extracts it to app-private storage. This variant is only buildable when the workflow downloads the verified runtime artifact and confirms its checksum/provenance first.
+- `autoDownload`: downloads a version-pinned bundle from a stable HTTPS URL, verifies a pinned SHA-256 before extraction, then installs transactionally. The URL and SHA-256 must be supplied by a verified release workflow; no mutable `latest` URL or invented checksum is allowed.
 
-Two delivery variants are required:
+## Build integration
 
-- **All-in-one APK:** package the exact validated runtime bundle and Android-native PRoot together with the app, subject to APK/Play delivery size constraints.
-- **Automatic-download APK:** download a version-pinned runtime bundle from a stable HTTPS release endpoint, verify its expected SHA-256 and provenance before extraction, and install it into app-private storage. Show progress, allow retry, and preserve a previous known-good installation if an update fails.
+The Android workflow should run after the runtime workflow succeeds, or be manually dispatched with an explicit successful runtime run ID. It must download `runtime-bundle-candidate` and `arm64-runtime-smoke-evidence` from that exact run, verify their SHA-256 evidence, and build both variants from the same commit. Never start a second runtime build just to package the APK.
 
-## Required implementation work
+The all-in-one build may package the runtime archive as an asset; check the resulting APK size. If it is too large for practical sideloading, prefer Android App Bundle + Play Asset Delivery for store distribution or the automatic-download variant for sideloading. Google Play documents a 100 MB legacy APK limit and separate Android App Bundle / asset-pack limits.
 
-1. Finish the current candidate runtime build and ARM64 Linux smoke stage. Reuse successful artifacts; do not rerun successful jobs just to repeat work.
-2. Define and validate a versioned runtime manifest containing the runtime version, source commits, file hashes, expected directory layout, supported ABI, and minimum free-storage requirement.
-3. Add an app-side runtime repository configuration with a pinned version and checksum. Do not trust an unversioned "latest" archive or accept an archive solely because it extracts.
-4. Make installation transactional: download to a temporary file, verify hash/provenance, extract to a staging directory, validate required files, then atomically switch the active runtime. Preserve the last known-good runtime on failure.
-5. Make first-run setup automatic and idempotent: storage checks, runtime installation, Wine prefix initialization, runtime preflight, and clear recovery messages.
-6. Replace manual installer selection with an explicit, user-friendly MT5 installation step. Use an official MetaQuotes source; do not bundle a proprietary MT5 installer unless distribution rights and licensing have been reviewed.
-7. Implement the primary Launch MT5 action only when the complete runtime and MT5 executable are present. Show meaningful process failures rather than claiming that a process launch proves GUI success.
-8. Build both APK variants from the same tested app revision. The all-in-one build must consume the exact verified runtime artifact; the download build must reference the exact same version and checksum.
-9. Record APK and runtime SHA-256 checksums and associate each test report with exact commit, APK hash, runtime version/hash, device model, Android version, and test date.
+## Runtime download/install safety
 
-## Validation gates
+1. Require HTTPS and an explicit pinned SHA-256.
+2. Download to a temporary file with a finite timeout and maximum size; report progress and retry safely.
+3. Verify SHA-256 before opening the archive.
+4. Extract into a staging directory with path traversal and symlink escape checks.
+5. Validate manifest, ARM64 Box64, both rootfs trees, Wine loader, provenance and expected checksums.
+6. Atomically switch the active bundle; preserve the last known-good bundle if installation fails.
+7. Initialize Wine prefix idempotently and run preflight. Never mark setup complete based only on successful extraction.
 
-- **Runtime candidate:** checksums/provenance and file-layout validation pass.
-- **Linux ARM64 smoke:** Box64 runs; Wine initializes a disposable prefix; 32-bit and 64-bit PE fixtures pass.
-- **Android integration:** app-private installation, Android-native PRoot, paths, permissions, lifecycle, and clean restart pass on a physical ARM64 Android device.
-- **MT5 functional validation:** official installer/client starts; GUI renders; login/server UI is usable; demo-account connectivity, quote/chart rendering, touch/input, restart, and 30-minute stability pass.
-- **Release:** only after the preceding evidence has been reviewed. GitHub Release publication is gated by the repository Actions variable `MT5_DEVICE_VALIDATION_PASSED=true`. Do not set it based on CI-only results.
+## Release gate
 
-## Current limitations
+A candidate runtime and successful ARM64 Linux smoke test are necessary but not sufficient. Physical ARM64 Android tests must cover Android-native PRoot, Wine prefix initialization, 32-/64-bit PE fixtures, MT5 GUI/input/network/chart behavior and stability. Only after evidence review may the repository Actions variable `MT5_DEVICE_VALIDATION_PASSED=true` be set.
 
-The existing app still has manual runtime archive and installer selection. The current runtime pipeline is experimental and has not yet established real-device MT5 compatibility. The two delivery variants are targets, not completed deliverables. No release APK should be described as fully functional until the physical-device gate passes.
+## Current limitation
+
+The current runtime build is still running Wine compilation. The bundle and ARM64 smoke stage are not complete yet. The app still has manual archive and MT5 installer selection, so neither delivery variant is complete today.
