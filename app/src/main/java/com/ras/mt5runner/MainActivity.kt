@@ -60,7 +60,15 @@ class MainActivity : Activity() {
             setOnClickListener { chooseInstaller() }
         }, params())
         root.addView(Button(this).apply {
-            text = "Wine + Box64 runtime bundle ইনস্টল করুন"
+            text = "All-in-one APK থেকে runtime ইনস্টল"
+            setOnClickListener { installBundledRuntime() }
+        }, params())
+        root.addView(Button(this).apply {
+            text = "Verified runtime স্বয়ংক্রিয় ডাউনলোড"
+            setOnClickListener { downloadVerifiedRuntime() }
+        }, params())
+        root.addView(Button(this).apply {
+            text = "Runtime archive ম্যানুয়ালি নির্বাচন"
             setOnClickListener { chooseRuntimeBundle() }
         }, params())
         root.addView(Button(this).apply {
@@ -121,6 +129,48 @@ class MainActivity : Activity() {
         setContentView(root)
         addLog("অ্যাপ চালু হয়েছে; প্রাইভেট runtime staging এবং Android-native PRoot এখনো প্রয়োজন।")
         refreshRuntimeStatus()
+    }
+
+    private fun installBundledRuntime() {
+        Thread({
+            try {
+                val assetPath = "runtime/runtime-bundle.tar.xz"
+                val available = assets.list("runtime")?.contains("runtime-bundle.tar.xz") == true
+                if (!available) throw IllegalStateException(
+                    "এই APK-তে runtime bundle embed করা নেই; verified bundle পাওয়ার পর all-in-one packaging পুনরায় build করতে হবে"
+                )
+                val archive = java.io.File(cacheDir, "runtime-bundle.tar.xz")
+                assets.open(assetPath).use { input ->
+                    archive.outputStream().use { output -> input.copyTo(output) }
+                }
+                val installed = RuntimeBundleInstaller(this).install(archive)
+                runOnUiThread {
+                    addLog("Bundled runtime private storage-এ install হয়েছে: ${installed.absolutePath}")
+                    refreshRuntimeStatus()
+                }
+                archive.delete()
+            } catch (e: Exception) {
+                runOnUiThread { addLog("All-in-one runtime install ব্যর্থ: ${e.message}") }
+            }
+        }, "bundled-runtime-install").start()
+    }
+
+    private fun downloadVerifiedRuntime() {
+        launchMt5Button.isEnabled = false
+        addLog("Verified runtime manifest পরীক্ষা ও download শুরু")
+        Thread({
+            try {
+                val installed = RuntimeAutoSetup(this).downloadAndInstall { message ->
+                    runOnUiThread { addLog("Runtime setup: $message") }
+                }
+                runOnUiThread {
+                    addLog("Runtime install সম্পন্ন: ${installed.absolutePath}")
+                    refreshRuntimeStatus()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { addLog("Automatic runtime setup ব্যর্থ: ${e.message}") }
+            }
+        }, "runtime-auto-setup").start()
     }
 
     private fun chooseRuntimeBundle() {
