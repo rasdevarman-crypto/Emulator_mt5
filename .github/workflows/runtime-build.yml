@@ -292,11 +292,17 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
           du -sh bundle bundle/rootfs bundle/rootfs-arm64 | tee provenance/package-rootfs-size-before-archive.txt
           df -h "$PWD" | tee provenance/package-disk-space-before-archive.txt
-          # xz -3 lowers peak CPU/memory pressure while preserving .tar.xz format.
-          sudo tar --numeric-owner -cf - bundle provenance | xz -T0 -3 > runtime-bundle-candidate.tar.xz
+          # Use single-threaded low-memory compression: the runner has a finite disk
+          # and memory budget, and xz -T0 may over-allocate threads while tar streams.
+          df -h "$PWD" | tee provenance/package-disk-space-before-compress.txt
+          free -h | tee provenance/package-memory-before-compress.txt
+          rm -f runtime-bundle-candidate.tar.xz runtime-bundle-candidate.tar.xz.sha256
+          set -o pipefail
+          sudo tar --numeric-owner -cf - bundle provenance | xz -T1 -0 > runtime-bundle-candidate.tar.xz
           test -s runtime-bundle-candidate.tar.xz
           xz -t runtime-bundle-candidate.tar.xz
           sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256
+          df -h "$PWD" | tee provenance/package-disk-space-after-compress.txt
       - name: Upload candidate bundle and provenance
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
