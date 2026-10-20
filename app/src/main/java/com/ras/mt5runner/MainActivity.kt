@@ -184,21 +184,17 @@ class MainActivity : Activity() {
                 }
 
                 val mt5 = try { runtimeManager.mt5Executable() } catch (_: Exception) { null }
-                if (mt5 == null) {
-                    runOnUiThread {
-                        setProgress("Runtime ও PRoot test সফল; MT5 এখনো ইনস্টল নেই", 100)
-                        addLog("Auto-start stopped safely: MT5 executable not found in Wine prefix; installer selection/launch was not started.")
+                runOnUiThread {
+                    setProgress(
+                        if (mt5 == null) "Runtime প্রস্তুত; MT5 ইনস্টল করা নেই" else "Runtime প্রস্তুত; MT5 launch ম্যানুয়াল",
+                        100
+                    )
+                    if (mt5 == null) {
+                        addLog("Runtime ও PRoot test সফল, কিন্তু Wine prefix-এ MT5 ইনস্টল নেই।")
                         status.text = "অবস্থা: runtime প্রস্তুত; MT5 ইনস্টল করা নেই"
-                    }
-                } else {
-                    runOnUiThread { setProgress("PRoot test সফল; MT5 চালু হচ্ছে…", null) }
-                    val process = runtimeManager.launchMt5 { line ->
-                        runOnUiThread { addLog("Wine/MT5: $line") }
-                    }
-                    runOnUiThread {
-                        setProgress("MT5 process শুরু হয়েছে", 100)
-                        addLog("Safe auto-start: MT5 process launched (pid=${process.pid()}); GUI compatibility still needs device verification.")
-                        status.text = "অবস্থা: MT5 process চালু হয়েছে"
+                    } else {
+                        addLog("Runtime ও PRoot test সফল। নির্দেশ অনুযায়ী MT5 স্বয়ংক্রিয়ভাবে চালু করা হয়নি।")
+                        status.text = "অবস্থা: runtime প্রস্তুত; MT5 ম্যানুয়ালি চালু করুন"
                     }
                 }
             } catch (e: Exception) {
