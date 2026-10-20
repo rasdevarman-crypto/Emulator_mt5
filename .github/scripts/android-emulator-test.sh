@@ -59,6 +59,7 @@ adb pull /sdcard/window.xml "$RUNNER_TEMP/android-diagnostics/initial-ui.xml" >/
 # staging when the log view was not present in the initial hierarchy.
 success_re='Runtime install সম্পন্ন|Embedded runtime checksum already verified|Runtime checksum যাচাই ও private staging সম্পন্ন|Verified runtime private staging complete'
 failure_re='Automatic runtime setup ব্যর্থ|not verified|SHA-256 mismatch|XZ archive|Permission denied|error=13|Runtime staging failed'
+active_re='Extraction: *[0-9]+%|Download: *[0-9]+%|Runtime setup:|Runtime auto-install attempt|Verified runtime install চেষ্টা|startup preflight চলছে'
 tap_done=0
 for i in $(seq 1 90); do
   timeout 12s adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
@@ -72,9 +73,11 @@ for i in $(seq 1 90); do
     echo "Runtime setup failure signature observed on poll $i." | tee -a "$report"
     break
   fi
-  # Startup auto-install is the normal path. If the manual button is visible, wait
-  # 90 seconds for automatic setup before tapping it as a fallback/retry.
-  if [ "$tap_done" -eq 0 ] && [ "$i" -ge 9 ]; then
+  # Startup auto-install is the normal path. Only tap the manual retry control if
+  # there is no active setup/progress evidence after 30 seconds; never start a
+  # second extraction while the large runtime archive is already being unpacked.
+  if [ "$tap_done" -eq 0 ] && [ "$i" -ge 3 ] &&
+     ! grep -Eqi "$active_re" "$RUNNER_TEMP/android-diagnostics/runtime-ui.xml" "$RUNNER_TEMP/android-diagnostics/runtime-logcat-poll.txt" 2>/dev/null; then
     python3 - "$RUNNER_TEMP/android-diagnostics/runtime-ui.xml" <<'PY' > "$RUNNER_TEMP/android-diagnostics/runtime-button.txt" 2>/dev/null || true
 import re,sys,xml.etree.ElementTree as ET
 try:
