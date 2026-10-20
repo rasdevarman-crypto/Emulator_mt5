@@ -67,7 +67,7 @@ jobs:
           APK_PATH: ${{ steps.apk.outputs.path }}
         run: |
           set -Eeuo pipefail
-          mkdir -p "$RUNNER_TEMP/apk-inspect"
+          mkdir -p "$RUNNER_TEMP/apk-inspect" "$RUNNER_TEMP/android-diagnostics"
           unzip -Z1 "$APK_PATH" > "$RUNNER_TEMP/apk-entries.txt"
           if grep -qx 'assets/runtime/runtime-bundle.tar.xz' "$RUNNER_TEMP/apk-entries.txt"; then
             unzip -p "$APK_PATH" assets/runtime/runtime-bundle.tar.xz > "$RUNNER_TEMP/runtime-bundle.tar.xz"
@@ -88,15 +88,34 @@ jobs:
             file "$RUNNER_TEMP/proot" | tee "$RUNNER_TEMP/proot-file.txt"
             readelf -h "$RUNNER_TEMP/proot" | tee "$RUNNER_TEMP/proot-elf.txt"
             if grep -q 'AArch64' "$RUNNER_TEMP/proot-elf.txt"; then
-              echo "proot_abi=arm64-v8a" >> "$GITHUB_OUTPUT"
+              echo "proot_asset_abi=arm64-v8a" >> "$GITHUB_OUTPUT"
             else
-              echo "proot_abi=unexpected" >> "$GITHUB_OUTPUT"
+              echo "proot_asset_abi=unexpected" >> "$GITHUB_OUTPUT"
               echo "::warning::Bundled PRoot ELF is not AArch64; inspect proot-elf.txt."
             fi
           else
-            echo "proot_abi=missing" >> "$GITHUB_OUTPUT"
+            echo "proot_asset_abi=missing" >> "$GITHUB_OUTPUT"
             echo "::warning::APK has no assets/runtime/proot/bin/proot payload."
           fi
+          # Validate the ABI-specific executables actually launched by RuntimeManager.
+          for abi in arm64-v8a x86_64; do
+            entry="lib/$abi/libproot.so"
+            loader_entry="lib/$abi/libproot_loader.so"
+            grep -qx "$entry" "$RUNNER_TEMP/apk-entries.txt" || { echo "::error::Missing native PRoot for ABI $abi"; exit 1; }
+            grep -qx "$loader_entry" "$RUNNER_TEMP/apk-entries.txt" || { echo "::error::Missing native PRoot loader for ABI $abi"; exit 1; }
+            unzip -p "$APK_PATH" "$entry" > "$RUNNER_TEMP/proot-native-$abi"
+            unzip -p "$APK_PATH" "$loader_entry" > "$RUNNER_TEMP/proot-loader-$abi"
+            readelf -h "$RUNNER_TEMP/proot-native-$abi" | tee "$RUNNER_TEMP/android-diagnostics/proot-native-$abi-elf.txt"
+            readelf -h "$RUNNER_TEMP/proot-loader-$abi" | tee "$RUNNER_TEMP/android-diagnostics/proot-loader-$abi-elf.txt"
+            if [ "$abi" = "arm64-v8a" ]; then
+              grep -q 'AArch64' "$RUNNER_TEMP/android-diagnostics/proot-native-$abi-elf.txt"
+              grep -q 'AArch64' "$RUNNER_TEMP/android-diagnostics/proot-loader-$abi-elf.txt"
+            else
+              grep -q 'X86-64' "$RUNNER_TEMP/android-diagnostics/proot-native-$abi-elf.txt"
+              grep -q 'X86-64' "$RUNNER_TEMP/android-diagnostics/proot-loader-$abi-elf.txt"
+            fi
+          done
+          echo "proot_abi=arm64-v8a+x86_64" >> "$GITHUB_OUTPUT"
 
       - name: Enable KVM for Android Emulator
         run: |
