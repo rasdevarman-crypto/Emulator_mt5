@@ -1,11 +1,14 @@
 name: 06 ARM64 Runtime Smoke Test
 on:
-  workflow_run:
-    workflows: ["05 Package Runtime Bundle"]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      upstream_run_id:
+        description: Successful runtime-bundle packaging run ID
+        required: true
+        type: string
 permissions:
   contents: read
-  actions: read
+  actions: write
 concurrency:
   group: split-runtime-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -15,14 +18,13 @@ env:
   WINE_SHA256: "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
 jobs:
   arm64-runtime-smoke:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     name: ARM64 Linux smoke test for Box64 + Wine
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ inputs.upstream_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: runtime-bundle-candidate
           path: build
@@ -82,3 +84,8 @@ jobs:
             build/runtime-bundle-candidate.tar.xz.sha256
           if-no-files-found: error
           retention-days: 7
+
+      - name: Dispatch runtime-inclusive Android build after smoke evidence and bundle upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run android-build.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f runtime_run_id="$GITHUB_RUN_ID"
