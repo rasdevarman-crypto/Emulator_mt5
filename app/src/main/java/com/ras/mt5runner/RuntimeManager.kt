@@ -162,15 +162,11 @@ class RuntimeManager(context: Context) {
 
     /** Verify on-disk evidence produced by wineboot; directory existence alone is insufficient. */
     fun verifyWinePrefix(): String {
-        val required = listOf(
-            File(prefix, "system.reg"),
-            File(prefix, "user.reg"),
-            File(prefix, "drive_c"),
-            File(prefix, "dosdevices")
-        )
-        val missing = required.filterNot { it.exists() }
+        val requiredFiles = listOf(File(prefix, "system.reg"), File(prefix, "user.reg"))
+        val requiredDirectories = listOf(File(prefix, "drive_c"), File(prefix, "dosdevices"))
+        val missing = requiredFiles.filterNot { it.isFile } + requiredDirectories.filterNot { it.isDirectory }
         check(missing.isEmpty()) {
-            "Wine prefix initialization evidence missing: ${missing.joinToString { it.name }}; prefix=${prefix.absolutePath}"
+            "Wine prefix initialization evidence missing or wrong type: ${missing.joinToString { it.name }}; prefix=${prefix.absolutePath}"
         }
         return "Wine prefix initialized and verified: system.reg, user.reg, drive_c, dosdevices; path=${prefix.absolutePath}"
     }
