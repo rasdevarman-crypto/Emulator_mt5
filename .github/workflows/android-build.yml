@@ -93,12 +93,15 @@ jobs:
           cd proot-static
           NDK="$ANDROID_HOME/ndk/28.2.13676358" OUT="$RUNNER_TEMP/proot-build" REPO_ARTIFACT_DIR="$RUNNER_TEMP/proot-dist" tools/build-static-aarch64.sh
           cd "$GITHUB_WORKSPACE"
-          mkdir -p app/src/main/assets/runtime/proot
+          mkdir -p app/src/main/assets/runtime/proot app/src/main/jniLibs/arm64-v8a
           cp -a "$RUNNER_TEMP/proot-build/root/." app/src/main/assets/runtime/proot/
-          test -x app/src/main/assets/runtime/proot/bin/proot
-          readelf -h app/src/main/assets/runtime/proot/bin/proot | tee /tmp/proot-elf.txt
+          # Package the standalone Android/Bionic executable as an extracted native-library
+          # payload so execve does not target writable filesDir (which may be noexec/EACCES).
+          install -m 0755 "$RUNNER_TEMP/proot-build/root/bin/proot" app/src/main/jniLibs/arm64-v8a/libproot.so
+          test -x app/src/main/jniLibs/arm64-v8a/libproot.so
+          readelf -h app/src/main/jniLibs/arm64-v8a/libproot.so | tee /tmp/proot-elf.txt
           grep -q AArch64 /tmp/proot-elf.txt
-          sha256sum app/src/main/assets/runtime/proot/bin/proot > app/src/main/assets/runtime/proot/proot.sha256
+          sha256sum app/src/main/jniLibs/arm64-v8a/libproot.so | tee app/src/main/assets/runtime/proot/proot.sha256
 
       - name: Build debug APK
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
