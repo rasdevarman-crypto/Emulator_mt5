@@ -67,9 +67,44 @@ class RuntimeManager(context: Context) {
         if (!File(hostRoot, "etc/os-release").isFile) missing += "ARM64 host rootfs incomplete"
         if (!File(hostRoot, "usr/local/bin/box64").canExecute()) missing += "ARM64 host rootfs Box64 executable missing"
         if (!File(wineRoot, "etc/os-release").isFile) missing += "x86_64 Wine rootfs incomplete"
-        if (!wine.isFile || !wine.canExecute()) missing += "Wine executable missing or not executable: ${wine.path}"
-        if (missing.isNotEmpty()) return Preflight(false, missing.joinToString("; "))
-        return Preflight(true, "Runtime files found. Android GUI/display compatibility is not validated.")
+        if (!wine.isFile || !wine.canExecute()) {
+            missing += "Wine executable missing or not executable: ${wine.path}; exists=${wine.isFile}; readable=${wine.canRead()}; executable=${wine.canExecute()}; bytes=${wine.length()}"
+        }
+
+        // Dependencies explicitly observed missing in ARM64 CI smoke logs.
+        // Check both standard multiarch library locations in the x86_64 Wine rootfs.
+        val libraryCandidates = mapOf(
+            "libfontconfig.so.1" to listOf(
+                File(wineRoot, "lib/x86_64-linux-gnu/libfontconfig.so.1"),
+                File(wineRoot, "usr/lib/x86_64-linux-gnu/libfontconfig.so.1")
+            ),
+            "libfreetype.so.6" to listOf(
+                File(wineRoot, "lib/x86_64-linux-gnu/libfreetype.so.6"),
+                File(wineRoot, "usr/lib/x86_64-linux-gnu/libfreetype.so.6")
+            ),
+            "libbrotlidec.so.1" to listOf(
+                File(wineRoot, "lib/x86_64-linux-gnu/libbrotlidec.so.1"),
+                File(wineRoot, "usr/lib/x86_64-linux-gnu/libbrotlidec.so.1")
+            )
+        )
+        libraryCandidates.forEach { (library, candidates) ->
+            if (candidates.none { it.isFile }) {
+                missing += "Wine rootfs dependency missing: $library; checked=${candidates.joinToString { it.path }}"
+            }
+        }
+
+        val manifestFile = File(bundle, "manifest.json")
+        val manifestStatus = if (!manifestFile.isFile) {
+            "missing"
+        } else {
+            runCatching {
+                org.json.JSONObject(manifestFile.readText()).optString("status", "unspecified")
+            }.getOrDefault("invalid-json")
+        }
+        if (missing.isNotEmpty()) {
+            return Preflight(false, missing.joinToString("; ") + "; embedded runtime manifest status=$manifestStatus (manifest status alone does not override archive checksum verification)")
+        }
+        return Preflight(true, "Runtime files and observed Wine dependencies found; embedded runtime manifest status=$manifestStatus. Android GUI/display compatibility is not validated.")
     }
 
     private fun startProot(command: List<String>): Process {
