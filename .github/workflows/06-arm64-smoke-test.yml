@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/06-arm64-smoke-test.yml"
+      - "app/build.gradle.kts"
   workflow_dispatch:
     inputs:
       upstream_run_id:
