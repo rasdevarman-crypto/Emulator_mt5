@@ -35,16 +35,12 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: pinned-runtime-sources
           path: build/runtime-sources-pass/
-          run-id: ${{ inputs.upstream_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           run-id: ${{ inputs.upstream_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: wine-11.0-wow64-x86_64-build-output
           path: build/wine-output-pass/
-          run-id: ${{ inputs.upstream_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install rootfs tools
         run: sudo apt-get update && sudo apt-get install -y debootstrap xz-utils file binutils
       - name: Assemble and verify ARM64 Ubuntu rootfs
