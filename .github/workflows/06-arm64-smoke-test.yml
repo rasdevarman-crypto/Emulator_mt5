@@ -105,6 +105,12 @@ jobs:
           runtime_run /x86root/opt/wine-11.0-wow64/bin/wine --version 2>&1 | tee wine-under-box64-smoke.txt
           grep -q 'wine-11.0' wine-under-box64-smoke.txt
           runtime_run /x86root/opt/wine-11.0-wow64/bin/wineboot --init 2>&1 | tee wineboot-smoke.txt
+          # Do not treat an existing empty directory as prefix initialization evidence.
+          test -s "$host_rootfs/tmp/wine-smoke-prefix/system.reg"
+          test -s "$host_rootfs/tmp/wine-smoke-prefix/user.reg"
+          test -d "$host_rootfs/tmp/wine-smoke-prefix/drive_c"
+          test -d "$host_rootfs/tmp/wine-smoke-prefix/dosdevices"
+          echo "Wine prefix evidence: system.reg, user.reg, drive_c/, dosdevices/ verified."
           runtime_run /x86root/opt/wine-11.0-wow64/bin/wine /tests/runtime-smoke-x86_64.exe 2>&1 | tee pe-x86_64-smoke.txt
           grep -q 'RUNTIME_SMOKE_OK pointer_bits=64' pe-x86_64-smoke.txt
           runtime_run /x86root/opt/wine-11.0-wow64/bin/wine /tests/runtime-smoke-i386.exe 2>&1 | tee pe-i386-smoke.txt
