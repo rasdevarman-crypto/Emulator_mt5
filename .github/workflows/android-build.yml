@@ -29,22 +29,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Package verified runtime for All-in-one APK after the successful ARM64 smoke test
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_run_id != '' }}
+      - name: Package latest verified runtime for the All-in-one APK
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         env:
           GH_TOKEN: ${{ github.token }}
-          RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
+          REQUESTED_RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p "$RUNNER_TEMP/runtime-artifact" app/src/main/assets/runtime
-          gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+          runtime_run_id="$REQUESTED_RUNTIME_RUN_ID"
+          if [[ -z "$runtime_run_id" ]]; then
+            # For ordinary pushes, use the newest successful ARM64 runtime smoke run on main.
+            runtime_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/06-arm64-smoke-test.yml/runs?branch=main&status=success&per_page=20" --jq '.workflow_runs | map(select(.conclusion == "success")) | first | .id // empty')"
+          fi
+          test -n "$runtime_run_id" || { echo "No successful ARM64 runtime smoke run found; refusing to build a misleading all-in-one APK." >&2; exit 1; }
+          echo "Packaging runtime artifact from successful smoke run: $runtime_run_id"
+          gh run download "$runtime_run_id" --repo "$GITHUB_REPOSITORY" \
             --name runtime-bundle-candidate --dir "$RUNNER_TEMP/runtime-artifact"
           cd "$RUNNER_TEMP/runtime-artifact"
           test -s runtime-bundle-candidate.tar.xz
           sha256sum -c runtime-bundle-candidate.tar.xz.sha256
-          # The orchestration dispatches this build only after the complete runtime workflow succeeds,
-          # including its ARM64 smoke job. Keep the candidate archive unchanged in APK assets.
           install -m 0644 runtime-bundle-candidate.tar.xz \
             "$GITHUB_WORKSPACE/app/src/main/assets/runtime/runtime-bundle.tar.xz"
           cd "$GITHUB_WORKSPACE"
@@ -100,7 +105,7 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       - name: Verify runtime archive is embedded intact in the APK
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_run_id != '' && !startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         shell: bash
         run: |
           set -Eeuo pipefail
