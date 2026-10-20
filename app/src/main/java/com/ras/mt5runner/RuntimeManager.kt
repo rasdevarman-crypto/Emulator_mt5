@@ -121,6 +121,60 @@ class RuntimeManager(context: Context) {
         }.redirectErrorStream(true).start()
     }
 
+    /**
+     * Explicitly initialize the app-private Wine prefix. This never starts an installer or MT5.
+     * Call verifyWinePrefix() after the returned wineboot process exits with code 0.
+     */
+    fun initializeWinePrefix(onLine: (String) -> Unit): Process {
+        val preflightResult = preflight()
+        check(preflightResult.ready) { preflightResult.message }
+        if (!prefix.exists() && !prefix.mkdirs()) {
+            throw IllegalStateException("Could not create private Wine prefix directory: ${prefix.absolutePath}")
+        }
+        val ldPath = listOf(
+            "/x86root/lib/x86_64-linux-gnu",
+            "/x86root/usr/lib/x86_64-linux-gnu",
+            "/x86root/lib64",
+            "/x86root/opt/wine-11.0-wow64/lib"
+        ).joinToString(":")
+        val command = listOf(
+            proot.absolutePath, "-r", hostRoot.absolutePath,
+            "-b", "${wineRoot.absolutePath}:/x86root",
+            "-b", "${prefix.absolutePath}:/wineprefix",
+            "-b", "/dev", "-b", "/proc", "--link2symlink", "-p", "-L",
+            "/usr/bin/env",
+            "BOX64_LD_LIBRARY_PATH=$ldPath",
+            "WINEPREFIX=/wineprefix",
+            "WINEDEBUG=-all",
+            "BOX64_DYNAREC=0",
+            "/usr/local/bin/box64",
+            "/x86root/opt/wine-11.0-wow64/bin/wineboot",
+            "--init"
+        )
+        return startProot(command).also { process ->
+            Thread({
+                process.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { line -> onLine(line.take(2000)) }
+                }
+            }, "wine-prefix-init-log").apply { isDaemon = true; start() }
+        }
+    }
+
+    /** Verify on-disk evidence produced by wineboot; directory existence alone is insufficient. */
+    fun verifyWinePrefix(): String {
+        val required = listOf(
+            File(prefix, "system.reg"),
+            File(prefix, "user.reg"),
+            File(prefix, "drive_c"),
+            File(prefix, "dosdevices")
+        )
+        val missing = required.filterNot { it.exists() }
+        check(missing.isEmpty()) {
+            "Wine prefix initialization evidence missing: ${missing.joinToString { it.name }}; prefix=${prefix.absolutePath}"
+        }
+        return "Wine prefix initialized and verified: system.reg, user.reg, drive_c, dosdevices; path=${prefix.absolutePath}"
+    }
+
     fun launchInstaller(installer: File, onLine: (String) -> Unit): Process {
         val preflightResult = preflight()
         check(preflightResult.ready) { preflightResult.message }
