@@ -259,6 +259,7 @@ class MainActivity : Activity() {
     private fun refreshRuntimeStatus() {
         val check = runtimeManager.preflight()
         val mt5Exists = try { runtimeManager.mt5Executable().isFile } catch (_: Exception) { false }
+        val mt5Exists = try { runtimeManager.mt5Executable().isFile } catch (_: Exception) { false }
         status.text = if (check.ready) {
             if (mt5Exists) "অবস্থা: Windows/MT5 চালুর জন্য প্রস্তুত" else "অবস্থা: runtime প্রস্তুত; প্রথমবার Windows ইনস্টল করতে Launch চাপুন"
         } else {
