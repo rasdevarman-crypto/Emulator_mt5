@@ -1,0 +1,91 @@
+name: 02 Build Wine 11.0
+on:
+  workflow_run:
+    workflows: ["01 Verify Runtime Sources"]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: split-runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  BOX64_COMMIT: "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
+  WINE_VERSION: "11.0"
+  WINE_SHA256: "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
+jobs:
+  build-wine:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: Build Wine 11.0 new WoW64 for x86_64 Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: pinned-runtime-sources
+          path: build/runtime-sources
+      - name: Verify Wine source archive
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "$WINE_SHA256  build/runtime-sources/wine-11.0.tar.xz" | sha256sum --check
+          mkdir -p build/wine-source
+          tar -xJf build/runtime-sources/wine-11.0.tar.xz --strip-components=1 -C build/wine-source
+          grep -Fxq 'Wine version 11.0' build/wine-source/VERSION
+      - name: Install Wine and MinGW build dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update
+          sudo apt-get build-dep -y wine
+          sudo apt-get install -y gcc-mingw-w64-i686 g++-mingw-w64-i686 gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 pkg-config file binutils xz-utils
+          mkdir -p logs/wine
+          dpkg-query -W -f='${binary:Package}=${Version}\n' | sort > logs/wine/apt-packages.txt
+          { gcc --version; make --version; i686-w64-mingw32-gcc --version; x86_64-w64-mingw32-gcc --version; } > logs/wine/toolchain.txt
+      - name: Configure and compile new WoW64 Wine
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p stage/wine
+          cd build/wine-source
+          ./configure --enable-archs=i386,x86_64 --prefix=/opt/wine-11.0-wow64 \
+            2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/configure.log"
+          grep -Eq '^PE_ARCHS = .*i386.*x86_64' Makefile
+          printf '%s\n' './configure --enable-archs=i386,x86_64 --prefix=/opt/wine-11.0-wow64' > "$GITHUB_WORKSPACE/logs/wine/configure-args.txt"
+          make -j2 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/build.log"
+          make install DESTDIR="$GITHUB_WORKSPACE/stage/wine" 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/install.log"
+          wine_bin="$GITHUB_WORKSPACE/stage/wine/opt/wine-11.0-wow64/bin/wine"
+          test -x "$wine_bin"
+          "$wine_bin" --version 2>&1 | tee "$GITHUB_WORKSPACE/logs/wine/version.txt"
+          grep -q "wine-11.0" "$GITHUB_WORKSPACE/logs/wine/version.txt"
+          file "$wine_bin" | tee "$GITHUB_WORKSPACE/logs/wine/file.txt"
+          x86_64-w64-mingw32-gcc -O2 -s "$GITHUB_WORKSPACE/tests/runtime-smoke.c" -o "$GITHUB_WORKSPACE/runtime-smoke-x86_64.exe"
+          i686-w64-mingw32-gcc -O2 -s "$GITHUB_WORKSPACE/tests/runtime-smoke.c" -o "$GITHUB_WORKSPACE/runtime-smoke-i386.exe"
+          file "$GITHUB_WORKSPACE/runtime-smoke-x86_64.exe" "$GITHUB_WORKSPACE/runtime-smoke-i386.exe" | tee "$GITHUB_WORKSPACE/logs/wine/pe-smoke-fixtures.txt"
+          tar -cJf "$GITHUB_WORKSPACE/wine-11.0-wow64-x86_64-install-tree.tar.xz" -C "$GITHUB_WORKSPACE/stage/wine" opt/wine-11.0-wow64
+          cd "$GITHUB_WORKSPACE"
+          sha256sum wine-11.0-wow64-x86_64-install-tree.tar.xz > wine-11.0-wow64-x86_64-install-tree.tar.xz.sha256
+      - name: Upload Wine build output and logs
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: wine-11.0-wow64-x86_64-build-output
+          path: |
+            wine-11.0-wow64-x86_64-install-tree.tar.xz
+            wine-11.0-wow64-x86_64-install-tree.tar.xz.sha256
+            runtime-smoke-x86_64.exe
+            runtime-smoke-i386.exe
+            logs/wine/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Carry forward pinned-runtime-sources artifact
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: pinned-runtime-sources
+          path: build/runtime-sources/
+          if-no-files-found: error
+          retention-days: 7

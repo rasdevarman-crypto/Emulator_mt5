@@ -1,0 +1,226 @@
+name: 05 Package Runtime Bundle
+on:
+  workflow_run:
+    workflows: ["04 Build ARM64 Host Rootfs"]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: split-runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  BOX64_COMMIT: "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
+  WINE_VERSION: "11.0"
+  WINE_SHA256: "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
+jobs:
+  package-rootfs-bundle:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: Assemble Ubuntu rootfs and candidate bundle
+    # Set repository variable RUNTIME_PACKAGE_RUNNER to the configured larger-runner
+    # label (for example, ubuntu-24.04-16core). Falls back to the standard runner.
+    runs-on: ${{ vars.RUNTIME_PACKAGE_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: box64-arm64-build-output
+          path: build/box64-output
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: wine-11.0-wow64-x86_64-build-output
+          path: build/wine-output
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: pinned-runtime-sources
+          path: build/runtime-sources
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: arm64-host-rootfs
+          path: build/arm64-rootfs
+      - name: Free unused runner disk space and report capacity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "=== Disk space before cleanup ==="
+          df -h "$GITHUB_WORKSPACE" /tmp
+          df -i "$GITHUB_WORKSPACE" /tmp
+          # This packaging-only job does not need these preinstalled SDK/tool caches.
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet \
+            /usr/local/share/boost /usr/share/swift
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          echo "=== Disk space after cleanup ==="
+          df -h "$GITHUB_WORKSPACE" /tmp
+          df -i "$GITHUB_WORKSPACE" /tmp
+      - name: Install rootfs tools
+        run: sudo apt-get update && sudo apt-get install -y debootstrap proot file binutils jq xz-utils
+      - name: Build Ubuntu 24.04 x86_64 rootfs and stage candidate bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p bundle/bin bundle/rootfs provenance
+          tar -xJf build/arm64-rootfs/arm64-host-rootfs.tar.xz -C bundle
+          cp bundle/rootfs-arm64/rootfs-apt-packages.txt provenance/arm64-rootfs-apt-packages.txt
+          mkdir -p bundle/provenance
+          cp provenance/arm64-rootfs-apt-packages.txt bundle/provenance/
+          tar -xJf build/box64-output/box64-arm64-install-tree.tar.xz -C bundle
+          test -x bundle/usr/local/bin/box64
+          install -m 0755 bundle/usr/local/bin/box64 bundle/bin/box64
+          rm -rf bundle/usr
+          sudo debootstrap --variant=minbase noble bundle/rootfs http://archive.ubuntu.com/ubuntu/
+          sudo cp build/wine-output/wine-11.0-wow64-x86_64-install-tree.tar.xz bundle/
+          wine_archive="bundle/wine-11.0-wow64-x86_64-install-tree.tar.xz"
+          # Validate the expected install-tree layout before modifying the rootfs.
+          # Do not use grep -q directly on tar's listing: grep may exit early,
+          # close the pipe, and make tar fail with "stdout: write error" under pipefail.
+          sudo tar -tJf "$wine_archive" | grep -Fx 'opt/wine-11.0-wow64/bin/wine' > /dev/null
+          sudo install -m 0755 /bin/bash bundle/rootfs/bin/bash
+          # Install Ubuntu dependencies first. Extract the Wine tree afterwards so
+          # package setup cannot leave the Wine prefix missing before validation.
+          sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
+            export DEBIAN_FRONTEND=noninteractive
+            if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
+              sed -i "s/Components: main/Components: main universe/" /etc/apt/sources.list.d/ubuntu.sources
+            else
+              sed -i "s/ main$/ main universe/" /etc/apt/sources.list
+            fi
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates file libc-bin libasound2t64 libasound2-plugins libpulse0 libx11-6 libxext6 libxrender1 libxrandr2 libxi6 libxfixes3 libxcursor1 libxinerama1 libxkbcommon0 libgl1 libvulkan1 libfontconfig1 libfreetype6 libdbus-1-3 libgnutls30t64 libgphoto2-6t64 libldap2 libmpg123-0t64 libopenal1 libpcap0.8t64 libsane1 libudev1 libunwind8 libusb-1.0-0 libv4l-0 libxcomposite1 libxdamage1 libxkbfile1 libxml2 libxslt1.1 libxxf86vm1 zlib1g libgcc-s1 libstdc++6 libncurses6 libtinfo6 libfaudio0 libvkd3d1 libvkd3d-shader1
+            dpkg-query -W -f="\${binary:Package}=\${Version}\\n" | sort > /tmp/runtime-apt-packages.txt
+          '
+          # Extract to a staging directory first, verify the expected executable,
+          # then copy the install tree into the rootfs at the canonical /opt path.
+          # This avoids silently producing a candidate without Wine if archive paths
+          # or extraction layout change.
+          mkdir -p build/wine-extract
+          tar -xJf "$wine_archive" -C build/wine-extract
+          test -x build/wine-extract/opt/wine-11.0-wow64/bin/wine
+          sudo install -d bundle/rootfs/opt/wine-11.0-wow64
+          sudo cp -a build/wine-extract/opt/wine-11.0-wow64/. bundle/rootfs/opt/wine-11.0-wow64/
+          sudo rm "$wine_archive"
+          sudo test -x bundle/rootfs/opt/wine-11.0-wow64/bin/wine
+          sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
+            test -x /opt/wine-11.0-wow64/bin/wine
+            # Wine Unix modules depend on sibling modules (e.g. crypt32.so -> ntdll.so).
+            # ldd needs Wine's private module directories in its search path.
+            export LD_LIBRARY_PATH="/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/opt/wine-11.0-wow64/lib/wine/i386-unix:/opt/wine-11.0-wow64/lib:\${LD_LIBRARY_PATH:-}"
+            find /opt/wine-11.0-wow64 -type f -print0 | while IFS= read -r -d "" f; do
+              if file "$f" | grep -q ELF; then
+                deps="$(ldd "$f" 2>&1 || true)"
+                if grep -q "not found" <<< "$deps"; then
+                  printf "Unresolved shared library for %s:\\n%s\\n" "$f" "$deps" >&2
+                  exit 1
+                fi
+              fi
+            done
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
+          '
+          sudo cp bundle/rootfs/tmp/runtime-apt-packages.txt provenance/rootfs-apt-packages.txt
+          mkdir -p bundle/provenance
+          cp provenance/rootfs-apt-packages.txt bundle/provenance/rootfs-apt-packages.txt
+          sudo rm bundle/rootfs/tmp/runtime-apt-packages.txt
+          mkdir -p bundle/rootfs/opt
+          ln -s ../rootfs/opt/wine-11.0-wow64/bin/wine bundle/bin/wine
+          cp build/runtime-sources/source-audit.json provenance/source-audit.json
+          mkdir -p provenance/box64 provenance/wine provenance/test-fixtures
+          cp build/box64-output/logs/box64/* provenance/box64/
+          cp build/wine-output/logs/wine/* provenance/wine/
+          cp build/wine-output/runtime-smoke-x86_64.exe provenance/test-fixtures/
+          cp build/wine-output/runtime-smoke-i386.exe provenance/test-fixtures/
+          cp build/box64-output/box64-arm64-install-tree.tar.xz.sha256 provenance/box64/ || true
+          cp build/wine-output/wine-11.0-wow64-x86_64-install-tree.tar.xz.sha256 provenance/wine/ || true
+          file bundle/bin/box64 | tee provenance/box64-file.txt
+          readelf -h bundle/bin/box64 | tee provenance/box64-elf-header.txt
+          grep -q AArch64 provenance/box64-elf-header.txt
+          test -x bundle/rootfs/opt/wine-11.0-wow64/bin/wine
+          test -f bundle/rootfs/etc/os-release
+          grep -q 'VERSION_ID="24.04"' bundle/rootfs/etc/os-release
+          wine_version="$(cat provenance/wine/version.txt 2>/dev/null || true)"
+          if [[ -z "$wine_version" ]]; then wine_version="$(grep -hE 'wine-[0-9]+\.[0-9]+' provenance/wine/version.txt 2>/dev/null | head -n1 || true)"; fi
+          [[ -n "$wine_version" ]] || wine_version="wine-11.0 (version output recorded in provenance)"
+          box64_version="$(grep -hE 'v?0\.4\.4|Box64' provenance/box64/version.txt 2>/dev/null | head -n1 || true)"
+          [[ -n "$box64_version" ]] || box64_version="Box64 v0.4.4 (version output recorded in provenance)"
+          box64_sha="$(sha256sum bundle/bin/box64 | awk '{print $1}')"
+          wine_sha="$(sha256sum bundle/bin/wine | awk '{print $1}')"
+          jq -n             --arg box64_version "$box64_version"             --arg box64_sha "$box64_sha"             --arg wine_version "$wine_version"             --arg wine_sha "$wine_sha"             --arg box64_source "https://github.com/ptitSeb/box64"             --arg wine_source "https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz"             --arg box64_commit "$BOX64_COMMIT"             --arg wine_archive_sha "$WINE_SHA256"             '{
+              schema_version: 1,
+              status: "candidate",
+              target_android_abi: "arm64-v8a",
+              box64: {path:"bin/box64", version:$box64_version, source_url:$box64_source, source_commit:$box64_commit, sha256:$box64_sha},
+              wine: {path:"bin/wine", version:$wine_version, source_url:$wine_source, source_archive_sha256:$wine_archive_sha, sha256:$wine_sha},
+              rootfs_path:"rootfs",
+              rootfs:{distribution:"Ubuntu", version:"24.04", architecture:"amd64", packages_file:"provenance/rootfs-apt-packages.txt"},
+              host_rootfs_path:"rootfs-arm64",
+              host_rootfs:{distribution:"Ubuntu", version:"24.04", architecture:"arm64", packages_file:"provenance/arm64-rootfs-apt-packages.txt"},
+              notes:"Experimental candidate assembled by CI. Not yet Android-device or MT5 validated; candidate status is not a compatibility claim."
+            }' > bundle/manifest.json
+          bash scripts/check-runtime-bundle.sh bundle
+          bash scripts/verify-runtime-provenance.sh bundle
+          # Keep the runtime libraries and provenance, but remove Ubuntu package
+          # documentation/locales/cache that are not needed to run Box64 or Wine.
+          # This limits peak disk use when the rootfs and compressed archive coexist.
+          for root in bundle/rootfs bundle/rootfs-arm64; do
+            sudo rm -rf "$root/usr/share/doc" "$root/usr/share/man" "$root/usr/share/info" \
+              "$root/usr/share/lintian" "$root/usr/share/bug" "$root/usr/share/games" \
+              "$root/var/cache/apt/archives" "$root/var/lib/apt/lists" "$root/var/log/"*
+            if [[ -d "$root/usr/share/locale" ]]; then
+              sudo find "$root/usr/share/locale" -mindepth 1 -maxdepth 1 ! -name 'C' -exec rm -rf {} +
+            fi
+          done
+          # All required build logs, fixtures and source audit data are already in
+          # provenance/ and bundle/. Discard intermediates before compression.
+          rm -rf build/wine-extract build/wine-output build/box64-output build/arm64-rootfs build/runtime-sources
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          du -sh bundle bundle/rootfs bundle/rootfs-arm64 | tee provenance/package-rootfs-size-before-archive.txt
+          df -h "$PWD" | tee provenance/package-disk-space-before-archive.txt
+          # Capture capacity immediately before compression; keep xz at one thread.
+          df -h "$PWD" | tee provenance/package-disk-space-before-compress.txt
+          df -i "$PWD" | tee provenance/package-inodes-before-compress.txt
+          free -h | tee provenance/package-memory-before-compress.txt
+          rm -f runtime-bundle-candidate.tar.xz runtime-bundle-candidate.tar.xz.partial runtime-bundle-candidate.tar.xz.sha256
+          set +e
+          sudo tar --numeric-owner -cf - bundle provenance 2>provenance/tar.stderr \
+            | xz -T1 -0 > runtime-bundle-candidate.tar.xz.partial 2>provenance/xz.stderr
+          pipeline_status=("${PIPESTATUS[@]}")
+          tar_status="${pipeline_status[0]}"
+          xz_status="${pipeline_status[1]}"
+          set -e
+          echo "tar exit code: $tar_status"
+          echo "xz exit code: $xz_status"
+          cat provenance/tar.stderr
+          cat provenance/xz.stderr
+          if (( tar_status != 0 || xz_status != 0 )); then
+            df -h "$PWD" | tee provenance/package-disk-space-after-failure.txt
+            df -i "$PWD" | tee provenance/package-inodes-after-failure.txt
+            rm -f runtime-bundle-candidate.tar.xz.partial
+            exit 1
+          fi
+          test -s runtime-bundle-candidate.tar.xz.partial
+          xz -t runtime-bundle-candidate.tar.xz.partial
+          mv runtime-bundle-candidate.tar.xz.partial runtime-bundle-candidate.tar.xz
+          sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256
+          df -h "$PWD" | tee provenance/package-disk-space-after-compress.txt
+      - name: Upload candidate bundle and provenance
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: runtime-bundle-candidate
+          path: |
+            runtime-bundle-candidate.tar.xz
+            runtime-bundle-candidate.tar.xz.sha256
+            provenance/
+          if-no-files-found: warn
+          retention-days: 7
+

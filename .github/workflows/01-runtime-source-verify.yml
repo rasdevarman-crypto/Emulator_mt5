@@ -1,0 +1,47 @@
+name: 01 Verify Runtime Sources
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "scripts/acquire-runtime-sources.sh"
+      - ".github/workflows/01-runtime-source-verify.yml"
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: runtime-build-v2-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  BOX64_COMMIT: "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
+  WINE_VERSION: "11.0"
+  WINE_SHA256: "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
+jobs:
+  acquire:
+    name: Verify pinned source inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install source audit tools
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Acquire and verify source inputs
+        run: |
+          bash -n scripts/acquire-runtime-sources.sh
+          bash scripts/acquire-runtime-sources.sh build/runtime-sources
+          jq empty build/runtime-sources/source-audit.json
+          test "$(jq -r '.box64.commit' build/runtime-sources/source-audit.json)" = "$BOX64_COMMIT"
+          test "$(jq -r '.wine.version' build/runtime-sources/source-audit.json)" = "$WINE_VERSION"
+          test "$(jq -r '.wine.source_archive_sha256' build/runtime-sources/source-audit.json)" = "$WINE_SHA256"
+      - name: Upload verified source inputs
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: pinned-runtime-sources
+          path: |
+            build/runtime-sources/source-audit.json
+            build/runtime-sources/wine-11.0.tar.xz
+            build/runtime-sources/box64/
+            !build/runtime-sources/box64/.git/**
+          if-no-files-found: error
+          retention-days: 7
+
