@@ -143,6 +143,10 @@ jobs:
           mv bundle/manifest.json.tmp bundle/manifest.json
           bash scripts/check-runtime-bundle.sh bundle
           bash scripts/verify-runtime-provenance.sh bundle
+          # wineboot can leave root-owned, mode-000 temporary .wine-* paths in rootfs-arm64/tmp.
+          # They are ephemeral lock/temp entries, not runtime payload or prefix evidence; remove them
+          # before archiving so an unprivileged tar does not fail with EACCES.
+          sudo find bundle/rootfs-arm64/tmp bundle/rootfs/tmp -mindepth 1 -maxdepth 1 -name '.wine-*' -exec rm -rf -- {} + 2>/dev/null || true
           rm -f build/runtime-bundle-candidate.tar.xz build/runtime-bundle-candidate.tar.xz.sha256
           tar --numeric-owner -cf - bundle provenance | xz -T1 -0 > build/runtime-bundle-candidate.tar.xz.partial
           mv build/runtime-bundle-candidate.tar.xz.partial build/runtime-bundle-candidate.tar.xz
