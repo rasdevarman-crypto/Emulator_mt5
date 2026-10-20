@@ -6,7 +6,6 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
-  workflow_dispatch:
     inputs:
       runtime_run_id:
         description: Successful ARM64 smoke-test run ID carrying the verified bundle
