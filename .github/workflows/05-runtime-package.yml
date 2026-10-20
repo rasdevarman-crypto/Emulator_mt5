@@ -153,9 +153,15 @@ jobs:
                 fi
               fi
             done < /tmp/wine-files.txt
-            apt-get clean
-            rm -rf /var/lib/apt/lists/*
           '
+          # APT cleanup is performed from the host after chroot exits. This avoids
+          # relying on APT's in-chroot lock/cache handling during final packaging.
+          echo "=== Rootfs cleanup diagnostics ==="
+          sudo stat -c '%A %a %U:%G %n' \
+            bundle/rootfs/var/cache/apt/archives \
+            bundle/rootfs/var/lib/apt/lists
+          sudo rm -rf bundle/rootfs/var/cache/apt/archives/* \
+            bundle/rootfs/var/lib/apt/lists/*
           sudo rm -f bundle/rootfs/tmp/wine-files.txt
           sudo cp bundle/rootfs/tmp/runtime-apt-packages.txt provenance/rootfs-apt-packages.txt
           mkdir -p bundle/provenance
@@ -242,6 +248,11 @@ jobs:
           xz -t runtime-bundle-candidate.tar.xz.partial
           mv runtime-bundle-candidate.tar.xz.partial runtime-bundle-candidate.tar.xz
           sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256
+          echo "=== Candidate bundle checksum verification ==="
+          sha256sum -c runtime-bundle-candidate.tar.xz.sha256
+          tar -tf runtime-bundle-candidate.tar.xz | grep -Fx 'bundle/manifest.json' > /dev/null
+          tar -tf runtime-bundle-candidate.tar.xz | grep -Fx 'bundle/bin/box64' > /dev/null
+          tar -tf runtime-bundle-candidate.tar.xz | grep -Fx 'bundle/bin/wine' > /dev/null
           df -h "$PWD" | tee provenance/package-disk-space-after-compress.txt
       - name: Upload candidate bundle and provenance
         if: always()
