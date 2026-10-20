@@ -5,6 +5,8 @@ on:
     paths:
       - ".github/workflows/06-arm64-smoke-test.yml"
       - "app/build.gradle.kts"
+      - "app/src/main/java/com/ras/mt5runner/**"
+      - "app/src/main/AndroidManifest.xml"
       - "gradle.properties"
   workflow_dispatch:
     inputs:
