@@ -144,12 +144,16 @@ class RuntimeAutoSetup(context: Context) {
                             "Runtime download exceeded the declared size"
                         }
                         output.write(buffer, 0, count)
+                        if (received == expectedSize || received % (4L * 1024L * 1024L) < count) {
+                            val percent = ((received * 100L) / expectedSize).toInt().coerceIn(0, 100)
+                            onProgress("Download: $percent% (${received / (1024 * 1024)} / ${expectedSize / (1024 * 1024)} MiB)")
+                        }
                     }
                     output.fd.sync()
                 }
             }
             require(received == expectedSize) { "Runtime download was incomplete ($received/$expectedSize bytes)" }
-            onProgress("Downloaded ${received / (1024 * 1024)} MiB; verifying SHA-256")
+            onProgress("Download: 100% (${received / (1024 * 1024)} MiB); verifying SHA-256")
         } finally {
             connection.disconnect()
         }
