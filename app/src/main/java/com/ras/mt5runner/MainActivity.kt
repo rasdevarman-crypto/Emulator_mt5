@@ -33,6 +33,7 @@ class MainActivity : Activity() {
     private val installerRequest = 5105
     private val exportLogsRequest = 5106
     private val runtimeBundleRequest = 5107
+    private val exportLogsZipRequest = 5108
     private val preferences by lazy { getSharedPreferences("runner_settings", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -227,7 +228,7 @@ class MainActivity : Activity() {
             type = "application/zip"
             putExtra(Intent.EXTRA_TITLE, "mt5-ras-runner-logs.zip")
         }
-        startActivityForResult(intent, exportLogsRequest + 1)
+        startActivityForResult(intent, exportLogsZipRequest)
     }
 
     private fun chooseRuntimeBundle() {
@@ -308,7 +309,7 @@ class MainActivity : Activity() {
                     addLog("লগ এক্সপোর্ট ব্যর্থ: ${e.message}")
                 }
             }
-            exportLogsRequest + 1 -> {
+            exportLogsZipRequest -> {
                 try {
                     val snapshot = logs.joinToString("\n", postfix = "\n")
                     val output = contentResolver.openOutputStream(uri)
