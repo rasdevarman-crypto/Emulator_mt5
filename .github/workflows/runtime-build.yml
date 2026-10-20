@@ -207,7 +207,9 @@ jobs:
           sudo cp build/wine-output/wine-11.0-wow64-x86_64-install-tree.tar.xz bundle/
           wine_archive="bundle/wine-11.0-wow64-x86_64-install-tree.tar.xz"
           # Validate the expected install-tree layout before modifying the rootfs.
-          sudo tar -tJf "$wine_archive" | grep -Fxq 'opt/wine-11.0-wow64/bin/wine'
+          # Do not use grep -q directly on tar's listing: grep may exit early,
+          # close the pipe, and make tar fail with "stdout: write error" under pipefail.
+          sudo tar -tJf "$wine_archive" | grep -Fx 'opt/wine-11.0-wow64/bin/wine' > /dev/null
           sudo install -m 0755 /bin/bash bundle/rootfs/bin/bash
           # Install Ubuntu dependencies first. Extract the Wine tree afterwards so
           # package setup cannot leave the Wine prefix missing before validation.
