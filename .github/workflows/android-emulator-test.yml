@@ -124,6 +124,8 @@ jobs:
             set -Eeuo pipefail
             mkdir -p "$RUNNER_TEMP/android-diagnostics"
             report="$RUNNER_TEMP/android-diagnostics/summary.txt"
+            # Preserve emulator evidence at the exact point of any failing command.
+            trap 'rc=$?; echo "FAILED command: ${BASH_COMMAND} (exit=$rc)" | tee -a "$report"; adb logcat -d -v threadtime > "$RUNNER_TEMP/android-diagnostics/logcat-on-error.txt" 2>&1 || true; adb shell dumpsys activity activities > "$RUNNER_TEMP/android-diagnostics/activities-on-error.txt" 2>&1 || true; adb shell dumpsys package "$PACKAGE_NAME" > "$RUNNER_TEMP/android-diagnostics/package-on-error.txt" 2>&1 || true; adb shell uiautomator dump /sdcard/error-window.xml >/dev/null 2>&1 || true; adb pull /sdcard/error-window.xml "$RUNNER_TEMP/android-diagnostics/ui-on-error.xml" >/dev/null 2>&1 || true; exit "$rc"' ERR
             {
               echo "Source build run: ${{ github.event.workflow_run.id || inputs.build_run_id }}"
               echo "APK SHA-256: $APK_SHA256"
