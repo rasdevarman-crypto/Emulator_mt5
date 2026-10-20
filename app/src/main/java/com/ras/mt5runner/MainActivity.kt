@@ -150,7 +150,7 @@ class MainActivity : Activity() {
                 }
                 archive.delete()
             } catch (e: Exception) {
-                runOnUiThread { addLog("All-in-one runtime install ব্যর্থ: ${e.message}") }
+                runOnUiThread { addLog("All-in-one runtime install ব্যর্থ: ${e.message ?: e.javaClass.simpleName}") }
             }
         }, "bundled-runtime-install").start()
     }
@@ -168,7 +168,7 @@ class MainActivity : Activity() {
                     refreshRuntimeStatus()
                 }
             } catch (e: Exception) {
-                runOnUiThread { addLog("Automatic runtime setup ব্যর্থ: ${e.message}") }
+                runOnUiThread { addLog("Automatic runtime setup ব্যর্থ: ${e.message ?: e.javaClass.simpleName}") }
             }
         }, "runtime-auto-setup").start()
     }
@@ -176,7 +176,7 @@ class MainActivity : Activity() {
     private fun chooseRuntimeBundle() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/x-xz"
+            type = "*/*"
         }
         startActivityForResult(intent, runtimeBundleRequest)
     }
