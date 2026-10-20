@@ -154,31 +154,31 @@ import re, sys, xml.etree.ElementTree as ET
 ui_path, files_path, report_path = sys.argv[1:]
 try:
     root = ET.parse(ui_path).getroot()
-    log_text = "\\n".join(n.attrib.get("text", "") for n in root.iter("node"))
+    log_text = "\n".join(n.attrib.get("text", "") for n in root.iter("node"))
 except Exception as e:
     log_text = ""
-    with open(report_path, "a") as out: out.write(f"Post-staging UI log parse failed: {e}\\n")
+    with open(report_path, "a") as out: out.write(f"Post-staging UI log parse failed: {e}\n")
 marker = "Verified runtime private staging complete:"
 post = log_text.rsplit(marker, 1)[-1] if marker in log_text else ""
-preflight = re.findall(r"Post-install PRoot/runtime preflight: ([^\\n]+)", post)
+preflight = re.findall(r"Post-install PRoot/runtime preflight: ([^\n]+)", post)
 smoke_ok = any("Runtime files and observed Wine dependencies found" in x for x in preflight)
 with open(report_path, "a") as out:
     out.write("Post-staging PRoot --version/preflight evidence: " +
-              ("PASS (app reports runtime files and observed Wine dependencies found)\\n" if smoke_ok else
-               "NOT CONFIRMED (post-install preflight success message absent)\\n"))
-    if preflight: out.write("Post-staging preflight detail: " + preflight[-1] + "\\n")
+              ("PASS (app reports runtime files and observed Wine dependencies found)\n" if smoke_ok else
+               "NOT CONFIRMED (post-install preflight success message absent)\n"))
+    if preflight: out.write("Post-staging preflight detail: " + preflight[-1] + "\n")
 with open(files_path, "r", errors="replace") as f: checks = f.read()
 with open(report_path, "a") as out:
     for lib in ("libfontconfig.so.1", "libfreetype.so.6", "libbrotlidec.so.1"):
         if re.search(r"PASS library present: .*" + re.escape(lib), checks):
-            out.write(f"Post-staging library {lib}: PRESENT\\n")
+            out.write(f"Post-staging library {lib}: PRESENT\n")
         elif re.search(r"FAIL missing library: " + re.escape(lib), checks):
-            out.write(f"Post-staging library {lib}: MISSING\\n")
-        else: out.write(f"Post-staging library {lib}: UNVERIFIED\\n")
+            out.write(f"Post-staging library {lib}: MISSING\n")
+        else: out.write(f"Post-staging library {lib}: UNVERIFIED\n")
     if post and re.search(r"Wine rootfs dependency missing:|Box64 binary missing|Wine executable missing|PRoot_EXECUTION_BLOCKED", post, re.I):
-        out.write("Post-staging runtime dependency/preflight failure: DETECTED\\n")
-    elif smoke_ok: out.write("Post-staging runtime dependency/preflight failure: NOT DETECTED\\n")
-    else: out.write("Post-staging runtime dependency/preflight failure: UNVERIFIED\\n")
+        out.write("Post-staging runtime dependency/preflight failure: DETECTED\n")
+    elif smoke_ok: out.write("Post-staging runtime dependency/preflight failure: NOT DETECTED\n")
+    else: out.write("Post-staging runtime dependency/preflight failure: UNVERIFIED\n")
 PY
 
 permission_error=0
