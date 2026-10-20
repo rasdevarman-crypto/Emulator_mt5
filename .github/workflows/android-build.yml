@@ -17,7 +17,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: android-build-release-${{ github.ref }}
+  # Push builds and the smoke-test-dispatched runtime build must not cancel each other.
+  group: android-build-release-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
