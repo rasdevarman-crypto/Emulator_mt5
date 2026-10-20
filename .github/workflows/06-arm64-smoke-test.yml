@@ -99,10 +99,7 @@ jobs:
               BOX64_LD_LIBRARY_PATH=/x86root/lib/x86_64-linux-gnu:/x86root/usr/lib/x86_64-linux-gnu:/x86root/lib64:/x86root/opt/wine-11.0-wow64/lib:/x86root/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/x86root/opt/wine-11.0-wow64/lib/wine/i386-unix \
               LD_LIBRARY_PATH=/x86root/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/x86root/opt/wine-11.0-wow64/lib/wine/i386-unix:/x86root/opt/wine-11.0-wow64/lib \
               WINEPREFIX=/tmp/wine-smoke-prefix WINEDEBUG=-all HOME=/root \
-              # Keep the CI smoke path on the conservative interpreter to avoid ARM64-host OOM
-              # from Box64 dynarec during Wine prefix initialization; app runtime keeps dynarec enabled.
-              BOX64_DYNAREC=0 \
-              /usr/local/bin/box64 "$@"
+              BOX64_DYNAREC=0 /usr/local/bin/box64 "$@"
           }
           runtime_run --version 2>&1 | tee box64-smoke-version.txt
           runtime_run /x86root/opt/wine-11.0-wow64/bin/wine --version 2>&1 | tee wine-under-box64-smoke.txt
