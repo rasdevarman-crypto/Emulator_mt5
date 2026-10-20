@@ -118,7 +118,7 @@ jobs:
               sed -i "s/ main$/ main universe/" /etc/apt/sources.list
             fi
             apt-get update
-            apt-get install -y --no-install-recommends ca-certificates file libc-bin libasound2t64 libasound2-plugins libpulse0 libx11-6 libxext6 libxrender1 libxrandr2 libxi6 libxfixes3 libxcursor1 libxinerama1 libxkbcommon0 libgl1 libvulkan1 libfontconfig1 libfreetype6 libdbus-1-3 libgnutls30t64 libgphoto2-6t64 libldap2 libmpg123-0t64 libopenal1 libpcap0.8t64 libsane1 libudev1 libunwind8 libusb-1.0-0 libv4l-0 libxcomposite1 libxdamage1 libxkbfile1 libxml2 libxslt1.1 libxxf86vm1 zlib1g libgcc-s1 libstdc++6 libncurses6 libtinfo6 libfaudio0 libvkd3d1 libvkd3d-shader1 libpcsclite1
+            apt-get install -y --no-install-recommends ca-certificates file libc-bin libasound2t64 libasound2-plugins libpulse0 libx11-6 libxext6 libxrender1 libxrandr2 libxi6 libxfixes3 libxcursor1 libxinerama1 libxkbcommon0 libgl1 libvulkan1 libfontconfig1 libfreetype6 libdbus-1-3 libgnutls30t64 libgphoto2-6t64 libldap2 libmpg123-0t64 libopenal1 libpcap0.8t64 libsane1 libudev1 libunwind8 libusb-1.0-0 libv4l-0 libxcomposite1 libxdamage1 libxkbfile1 libxml2 libxslt1.1 libxxf86vm1 zlib1g libgcc-s1 libstdc++6 libncurses6 libtinfo6 libfaudio0 libvkd3d1 libvkd3d-shader1 libpcsclite1 libcapi20-3t64
             dpkg-query -W -f="\${binary:Package}=\${Version}\\n" | sort > /tmp/runtime-apt-packages.txt
           '
           # The archive is rooted at opt/. Extract directly into the target rootfs;
@@ -149,6 +149,8 @@ jobs:
             wc -l /tmp/wine-files.txt
             sed -n "1,5p" /tmp/wine-files.txt
             export LD_LIBRARY_PATH="/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/opt/wine-11.0-wow64/lib/wine/i386-unix:/opt/wine-11.0-wow64/lib:\${LD_LIBRARY_PATH:-}"
+            unresolved_file=/tmp/wine-unresolved-libraries.txt
+            : > "$unresolved_file"
             while IFS= read -r f; do
               [[ -n "$f" ]] || continue
               if [[ ! -f "$f" ]]; then
@@ -158,11 +160,15 @@ jobs:
               if file "$f" | grep -q ELF; then
                 deps="$(ldd "$f" 2>&1 || true)"
                 if grep -q "not found" <<< "$deps"; then
-                  printf "Unresolved shared library for %s:\\n%s\\n" "$f" "$deps" >&2
-                  exit 1
+                  printf "Unresolved shared library for %s:\\n%s\\n" "$f" "$deps" | tee -a "$unresolved_file" >&2
                 fi
               fi
             done < /tmp/wine-files.txt
+            if [[ -s "$unresolved_file" ]]; then
+              echo "Wine dependency scan found unresolved libraries (full list above)." >&2
+              exit 1
+            fi
+            rm -f "$unresolved_file"
           '
           # APT cleanup is performed from the host after chroot exits. This avoids
           # relying on APT's in-chroot lock/cache handling during final packaging.
