@@ -1,10 +1,16 @@
 name: 05 Package Runtime Bundle
 on:
+  # Also run when this packaging workflow itself is repaired on main. In that
+  # case, select the latest successful rootfs run automatically.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/05-runtime-package.yml"
   workflow_dispatch:
     inputs:
       upstream_run_id:
-        description: Successful ARM64 rootfs build run ID
-        required: true
+        description: Successful ARM64 rootfs build run ID (auto-select latest on blank)
+        required: false
         type: string
 permissions:
   contents: read
@@ -25,27 +31,42 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Resolve upstream rootfs run
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.upstream_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_id="$REQUESTED_RUN_ID"
+          if [[ -z "$run_id" ]]; then
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow 04-arm64-rootfs.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          fi
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "No successful ARM64 rootfs run ID found: '$run_id'" >&2; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Using successful ARM64 rootfs run: $run_id"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: box64-arm64-build-output
           path: build/box64-output
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: wine-11.0-wow64-x86_64-build-output
           path: build/wine-output
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: pinned-runtime-sources
           path: build/runtime-sources
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: arm64-host-rootfs
           path: build/arm64-rootfs
@@ -100,23 +121,27 @@ jobs:
             apt-get install -y --no-install-recommends ca-certificates file libc-bin libasound2t64 libasound2-plugins libpulse0 libx11-6 libxext6 libxrender1 libxrandr2 libxi6 libxfixes3 libxcursor1 libxinerama1 libxkbcommon0 libgl1 libvulkan1 libfontconfig1 libfreetype6 libdbus-1-3 libgnutls30t64 libgphoto2-6t64 libldap2 libmpg123-0t64 libopenal1 libpcap0.8t64 libsane1 libudev1 libunwind8 libusb-1.0-0 libv4l-0 libxcomposite1 libxdamage1 libxkbfile1 libxml2 libxslt1.1 libxxf86vm1 zlib1g libgcc-s1 libstdc++6 libncurses6 libtinfo6 libfaudio0 libvkd3d1 libvkd3d-shader1
             dpkg-query -W -f="\${binary:Package}=\${Version}\\n" | sort > /tmp/runtime-apt-packages.txt
           '
-          # Extract to a staging directory first, verify the expected executable,
-          # then copy the install tree into the rootfs at the canonical /opt path.
-          # This avoids silently producing a candidate without Wine if archive paths
-          # or extraction layout change.
-          mkdir -p build/wine-extract
-          tar -xJf "$wine_archive" -C build/wine-extract
-          test -x build/wine-extract/opt/wine-11.0-wow64/bin/wine
-          sudo install -d bundle/rootfs/opt/wine-11.0-wow64
-          sudo cp -a build/wine-extract/opt/wine-11.0-wow64/. bundle/rootfs/opt/wine-11.0-wow64/
+          # The archive is rooted at opt/. Extract directly into the target rootfs;
+          # staging plus cp -a passed host-side checks but Wine was absent inside chroot.
+          # Save a short archive listing to make future layout changes diagnosable.
+          sudo tar -tJf "$wine_archive" | sed -n '1,40p' | tee provenance/wine-archive-layout.txt
+          sudo tar -tJf "$wine_archive" | grep -Fx 'opt/wine-11.0-wow64/bin/wine' > /dev/null
+          sudo tar -xJf "$wine_archive" -C bundle/rootfs
           sudo rm "$wine_archive"
+          echo "=== Wine path on host ==="
+          sudo ls -ld bundle/rootfs/opt bundle/rootfs/opt/wine-11.0-wow64 bundle/rootfs/opt/wine-11.0-wow64/bin
+          sudo ls -l bundle/rootfs/opt/wine-11.0-wow64/bin/wine
           sudo test -x bundle/rootfs/opt/wine-11.0-wow64/bin/wine
           sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
+            echo "=== Wine path inside chroot ==="
+            ls -ld /opt /opt/wine-11.0-wow64 /opt/wine-11.0-wow64/bin
+            ls -l /opt/wine-11.0-wow64/bin/wine
             test -x /opt/wine-11.0-wow64/bin/wine
+            test -d /opt/wine-11.0-wow64/lib
             # Wine Unix modules depend on sibling modules (e.g. crypt32.so -> ntdll.so).
             # ldd needs Wine's private module directories in its search path.
             export LD_LIBRARY_PATH="/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/opt/wine-11.0-wow64/lib/wine/i386-unix:/opt/wine-11.0-wow64/lib:\${LD_LIBRARY_PATH:-}"
-            find /opt/wine-11.0-wow64 -type f -print0 | while IFS= read -r -d "" f; do
+            while IFS= read -r -d "" f; do
               if file "$f" | grep -q ELF; then
                 deps="$(ldd "$f" 2>&1 || true)"
                 if grep -q "not found" <<< "$deps"; then
@@ -124,7 +149,7 @@ jobs:
                   exit 1
                 fi
               fi
-            done
+            done < <(find /opt/wine-11.0-wow64 -type f -print0)
             apt-get clean
             rm -rf /var/lib/apt/lists/*
           '
