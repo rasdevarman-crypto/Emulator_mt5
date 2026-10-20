@@ -121,16 +121,18 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 600
           script: |
-            set -Eeuo pipefail
+            # reactivecircus/android-emulator-runner executes this script with /usr/bin/sh.
+            # Keep the script POSIX-shell compatible (no pipefail, [[ ]], or here-strings).
+            set -eu
             mkdir -p "$RUNNER_TEMP/android-diagnostics"
             report="$RUNNER_TEMP/android-diagnostics/summary.txt"
             # EXIT trap captures evidence for both ordinary failures and explicit exits; all adb calls are bounded.
             capture_on_exit() {
               rc=$?
-              trap - EXIT
+              trap - 0
               {
                 echo "Emulator script exit code: $rc"
-                echo "Failure point: ${BASH_COMMAND}"
+                echo "Failure diagnostics capture triggered."
                 echo "Captured at UTC: $(date -u +%FT%TZ)"
               } >> "$report" 2>&1 || true
               timeout 15s adb devices -l > "$RUNNER_TEMP/android-diagnostics/adb-devices-on-exit.txt" 2>&1 || true
@@ -141,7 +143,7 @@ jobs:
               timeout 15s adb pull /sdcard/error-window.xml "$RUNNER_TEMP/android-diagnostics/ui-on-exit.xml" >> "$RUNNER_TEMP/android-diagnostics/ui-dump-command-on-exit.txt" 2>&1 || true
               exit "$rc"
             }
-            trap capture_on_exit EXIT
+            trap capture_on_exit 0
             {
               echo "Source build run: ${{ github.event.workflow_run.id || inputs.build_run_id }}"
               echo "APK SHA-256: $APK_SHA256"
@@ -238,12 +240,12 @@ jobs:
               echo "::error::Android app crash detected; see diagnostics artifact."
               exit 1
             fi
-            if grep -qi 'AArch64' "$RUNNER_TEMP/proot-elf.txt" 2>/dev/null && ! grep -qi 'arm64-v8a' <<< "$(adb shell getprop ro.product.cpu.abilist)"; then
+            if grep -qi 'AArch64' "$RUNNER_TEMP/proot-elf.txt" 2>/dev/null && ! printf '%s\n' "$(adb shell getprop ro.product.cpu.abilist)" | grep -qi 'arm64-v8a'; then
               echo "ABI note: PRoot ELF is AArch64, while emulator ABI list omits arm64-v8a; this is not by itself proof of failure because API/system-image translation may exist. Actual PRoot execution evidence is required." | tee -a "$report"
               echo "::warning::ARM64 PRoot execution depends on the API 35 x86_64 image's translation support; see actual preflight output and logs."
             fi
             echo "Android install/launch and diagnostics collection completed." | tee -a "$report"
-            if [[ "$permission_error" -eq 1 ]]; then
+            if [ "$permission_error" -eq 1 ]; then
               echo "::error::PRoot permission error signature detected in app UI/logcat."
               exit 1
             fi
