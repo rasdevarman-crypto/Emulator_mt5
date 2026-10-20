@@ -76,30 +76,10 @@ else
   exit 1
 fi
 
-# Trigger app's runtime preflight/PRoot execution path.
-adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
-adb pull /sdcard/window.xml "$RUNNER_TEMP/android-diagnostics/preflight-ui.xml" >/dev/null 2>&1 || true
-python3 - "$RUNNER_TEMP/android-diagnostics/preflight-ui.xml" <<'PY' > "$RUNNER_TEMP/android-diagnostics/launch-button.txt" || true
-import re,sys,xml.etree.ElementTree as ET
-try:
-    root=ET.parse(sys.argv[1]).getroot()
-    for n in root.iter('node'):
-        if 'windows চালু করুন' in n.attrib.get('text','').lower():
-            m=re.search(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.attrib.get('bounds',''))
-            if m:
-                x1,y1,x2,y2=map(int,m.groups()); print((x1+x2)//2,(y1+y2)//2); raise SystemExit(0)
-except Exception: pass
-raise SystemExit(1)
-PY
-if test -s "$RUNNER_TEMP/android-diagnostics/launch-button.txt"; then
-  read -r x y < "$RUNNER_TEMP/android-diagnostics/launch-button.txt"
-  adb shell input tap "$x" "$y"
-  echo "Tapped Windows launch / runtime preflight at $x,$y" | tee -a "$report"
-  sleep 25
-else
-  echo "::error::Could not locate Windows launch button in UI hierarchy."
-  exit 1
-fi
+# Do NOT tap the Windows launch button: it can launch MT5 if an existing prefix is found.
+# MainActivity performs a guarded startup preflight itself; collect its UI/logcat evidence only.
+echo "Windows launch button intentionally NOT tapped; MT5 must not auto-launch during CI diagnostics." | tee -a "$report"
+sleep 25
 
 adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
 adb pull /sdcard/window.xml "$RUNNER_TEMP/android-diagnostics/final-ui.xml" >/dev/null 2>&1 || true
