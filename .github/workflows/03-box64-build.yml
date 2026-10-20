@@ -35,7 +35,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: wine-11.0-wow64-x86_64-build-output
           path: build/wine-output-pass/
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ inputs.upstream_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Box64 build dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libcapstone-dev libepoxy-dev libx11-dev libxext-dev libxfixes-dev libxrender-dev libxrandr-dev libxi-dev libxinerama-dev libxcursor-dev libxkbcommon-dev libvulkan-dev file binutils jq
