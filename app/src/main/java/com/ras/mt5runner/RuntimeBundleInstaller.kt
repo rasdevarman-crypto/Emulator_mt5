@@ -19,7 +19,7 @@ class RuntimeBundleInstaller(context: Context) {
     private val maxExpandedBytes = 8L * 1024L * 1024L * 1024L
     private val maxEntries = 300_000
 
-    fun install(archive: File, expectedSha256: String? = null): File {
+    fun install(archive: File, expectedSha256: String? = null, onProgress: (String) -> Unit = {}): File {
         require(archive.isFile && archive.canRead()) { "Runtime archive is not readable" }
         expectedSha256?.let { expected ->
             require(expected.matches(Regex("[a-fA-F0-9]{64}"))) { "Expected runtime SHA-256 is malformed" }
@@ -63,6 +63,27 @@ class RuntimeBundleInstaller(context: Context) {
         var sawBundleEntry = false
 
         try {
+            // Scan tar metadata once so extraction can report a real file-byte percentage.
+            var totalFileBytes = 0L
+            onProgress("Extraction: archive scan 0%")
+            BufferedInputStream(FileInputStream(archive)).use { fileInput ->
+                XZCompressorInputStream(fileInput).use { xz ->
+                    TarArchiveInputStream(xz).use { tar ->
+                        while (true) {
+                            val entry = tar.nextTarEntry ?: break
+                            if (entry.name == "bundle" || entry.name.startsWith("bundle/")) {
+                                if (entry.isFile) {
+                                    totalFileBytes += entry.size
+                                    require(totalFileBytes <= maxExpandedBytes) { "Runtime archive exceeds expanded size limit" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            require(totalFileBytes > 0L) { "Runtime archive has no regular bundle files" }
+            onProgress("Extraction: 0% (private staging)")
+            var lastReportedPercent = -1
             BufferedInputStream(FileInputStream(archive)).use { fileInput ->
                 XZCompressorInputStream(fileInput).use { xz ->
                     TarArchiveInputStream(xz).use { tar ->
@@ -108,7 +129,20 @@ class RuntimeBundleInstaller(context: Context) {
                                 require(totalBytes <= maxExpandedBytes) { "Runtime archive exceeds expanded size limit" }
                                 output.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Could not create file parent") }
                                 require(!output.exists()) { "Duplicate runtime archive path: ${output.path}" }
-                                output.outputStream().use { out -> tar.copyTo(out) }
+                                output.outputStream().use { out ->
+                                    val buffer = ByteArray(128 * 1024)
+                                    while (true) {
+                                        val count = tar.read(buffer)
+                                        if (count < 0) break
+                                        out.write(buffer, 0, count)
+                                        totalBytes += count
+                                        val percent = ((totalBytes * 100L) / totalFileBytes).toInt().coerceIn(0, 100)
+                                        if (percent != lastReportedPercent) {
+                                            lastReportedPercent = percent
+                                            onProgress("Extraction: $percent% (\${totalBytes / (1024 * 1024)} MiB)")
+                                        }
+                                    }
+                                }
                                 if ((entry.mode and 0x49) != 0) output.setExecutable(true, false)
                             }
                         }
