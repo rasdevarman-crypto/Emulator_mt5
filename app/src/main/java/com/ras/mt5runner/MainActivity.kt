@@ -140,10 +140,12 @@ class MainActivity : Activity() {
                     "এই APK-তে runtime bundle embed করা নেই; verified bundle পাওয়ার পর all-in-one packaging পুনরায় build করতে হবে"
                 )
                 val archive = java.io.File(cacheDir, "runtime-bundle.tar.xz")
+                val expectedSha256 = assets.open("runtime/runtime-bundle.tar.xz.sha256")
+                    .bufferedReader(Charsets.UTF_8).use { it.readText().trim().split(Regex("\\s+")).first() }
                 assets.open(assetPath).use { input ->
                     archive.outputStream().use { output -> input.copyTo(output) }
                 }
-                val installed = RuntimeBundleInstaller(this).install(archive)
+                val installed = RuntimeBundleInstaller(this).install(archive, expectedSha256)
                 runOnUiThread {
                     addLog("Bundled runtime private storage-এ install হয়েছে: ${installed.absolutePath}")
                     refreshRuntimeStatus()
