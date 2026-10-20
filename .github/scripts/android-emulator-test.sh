@@ -109,6 +109,21 @@ if grep -Eqi 'FATAL EXCEPTION|Process: com\.ras\.mt5runner' "$RUNNER_TEMP/androi
   echo "::error::Android app crash detected; see diagnostics artifact."
   exit 1
 fi
+
+# Surface the known Wine rootfs library failures and manifest state in a stable summary.
+if grep -Eqi 'libfontconfig\.so\.1|libfreetype\.so\.6|libbrotlidec\.so\.1|Wine rootfs dependency missing' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"; then
+  echo "Wine dependency diagnostic: one or more observed runtime libraries are missing; inspect app logcat/UI." | tee -a "$report"
+else
+  echo "Wine dependency diagnostic: no known missing-library signature observed in captured app UI/logcat (not proof that all dependencies resolve)." | tee -a "$report"
+fi
+if grep -Eqi 'manifest status=pending-runtime-build|not verified|pending-runtime-build' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"; then
+  echo "Runtime manifest status: pending/unverified; auto-download must refuse this manifest." | tee -a "$report"
+fi
+if grep -Eqi 'private staging|runtime/bundle|bundle\.installing|Runtime staging failed' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"; then
+  echo "Private staging diagnostics: evidence found; inspect full logs for completed/failed staging state." | tee -a "$report"
+else
+  echo "Private staging diagnostics: no staging path signature captured." | tee -a "$report"
+fi
 if grep -qi 'AArch64' "$RUNNER_TEMP/proot-elf.txt" 2>/dev/null && ! printf '%s\n' "$(adb shell getprop ro.product.cpu.abilist)" | grep -qi 'arm64-v8a'; then
   echo "ABI note: PRoot ELF is AArch64, while emulator ABI list omits arm64-v8a; actual PRoot execution evidence is required." | tee -a "$report"
   echo "::warning::ARM64 PRoot execution depends on API 35 x86_64 image translation support; see actual preflight output and logs."
