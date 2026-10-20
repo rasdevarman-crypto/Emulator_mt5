@@ -14,7 +14,12 @@ command -v jq >/dev/null 2>&1 || fail "jq is required"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
 
 status="$(jq -r '.status // empty' "$manifest")"
-[[ "$status" == "ready-for-review" || "$status" == "candidate" ]] || fail "manifest status must be candidate or ready-for-review (got: ${status:-empty})"
+[[ "$status" == "candidate" || "$status" == "arm64-smoke-tested" || "$status" == "ready-for-review" ]] || fail "manifest status must be candidate, arm64-smoke-tested, or ready-for-review (got: ${status:-empty})"
+
+if [[ "$status" == "arm64-smoke-tested" ]]; then
+  smoke_passed="$(jq -r '.verification.arm64_smoke_test // false' "$manifest")"
+  [[ "$smoke_passed" == "true" ]] || fail "arm64-smoke-tested status requires verification.arm64_smoke_test=true"
+fi
 
 for component in box64 wine; do
   path="$(jq -r --arg c "$component" '.[$c].path // empty' "$manifest")"
