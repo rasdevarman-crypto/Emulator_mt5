@@ -258,12 +258,12 @@ class MainActivity : Activity() {
 
     private fun refreshRuntimeStatus() {
         val check = runtimeManager.preflight()
+        val mt5Exists = try { runtimeManager.mt5Executable().isFile } catch (_: Exception) { false }
         status.text = if (check.ready) {
             if (mt5Exists) "অবস্থা: Windows/MT5 চালুর জন্য প্রস্তুত" else "অবস্থা: runtime প্রস্তুত; প্রথমবার Windows ইনস্টল করতে Launch চাপুন"
         } else {
             "অবস্থা: runtime প্রস্তুত নয় — Launch চাপলে স্বয়ংক্রিয়ভাবে runtime ইনস্টল হবে: ${check.message}"
         }
-        val mt5Exists = try { runtimeManager.mt5Executable().isFile } catch (_: Exception) { false }
         launchMt5Button.isEnabled = true
         if (!check.ready) addLog("Runtime preflight: ${check.message}")
         else if (!mt5Exists) addLog("Runtime preflight: MT5 terminal.exe এখনো Wine prefix-এ পাওয়া যায়নি")
