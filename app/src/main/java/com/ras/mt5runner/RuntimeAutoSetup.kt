@@ -25,6 +25,9 @@ class RuntimeAutoSetup(context: Context) {
     private val maxArchiveBytes = 3L * 1024L * 1024L * 1024L
 
     fun downloadAndInstall(onProgress: (String) -> Unit): File {
+        // Prefer the checksum-pinned archive already embedded in an all-in-one APK.
+        // This avoids blocking setup on a remote manifest that is intentionally still pending.
+        installEmbeddedRuntimeIfAvailable(onProgress)?.let { return it }
         val manifest = downloadManifest(onProgress)
         require(manifest.optInt("schema_version", -1) == 1) { "Unsupported runtime manifest schema" }
         require(manifest.optString("status") == "verified") {
@@ -54,6 +57,68 @@ class RuntimeAutoSetup(context: Context) {
             return RuntimeBundleInstaller(appContext).install(archive)
         } finally {
             staging.delete()
+            archive.delete()
+        }
+    }
+
+    private fun installEmbeddedRuntimeIfAvailable(onProgress: (String) -> Unit): File? {
+        val runtimeAssets = appContext.assets.list("runtime") ?: return null
+        if (!runtimeAssets.contains("runtime-bundle.tar.xz")) return null
+
+        val expectedHash = appContext.assets.open("runtime/runtime-bundle.tar.xz.sha256")
+            .bufferedReader(Charsets.UTF_8).use { it.readText().trim().split(Regex("\\s+")).firstOrNull().orEmpty() }
+            .lowercase()
+        require(expectedHash.matches(Regex("[a-f0-9]{64}"))) {
+            "Embedded runtime SHA-256 sidecar is missing or malformed"
+        }
+
+        val runtimeDir = File(appContext.filesDir, "runtime")
+        val target = File(runtimeDir, "bundle")
+        val marker = File(runtimeDir, ".embedded-runtime-sha256")
+        val stagedFilesPresent = File(target, "manifest.json").isFile &&
+            File(target, "bin/box64").canExecute() &&
+            File(target, "rootfs-arm64/etc/os-release").isFile &&
+            File(target, "rootfs/opt/wine-11.0-wow64/bin/wine").canExecute()
+        if (marker.isFile && marker.readText().trim() == expectedHash && stagedFilesPresent) {
+            onProgress("Embedded runtime checksum already verified; private staging is current")
+            return target
+        }
+
+        val archive = File(appContext.cacheDir, "runtime-embedded.tar.xz")
+        try {
+            if (archive.exists() && !archive.delete()) {
+                throw IllegalStateException("Cannot clear previous embedded runtime staging archive")
+            }
+            var received = 0L
+            appContext.assets.open("runtime/runtime-bundle.tar.xz").use { input ->
+                FileOutputStream(archive).use { output ->
+                    val buffer = ByteArray(128 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        received += count
+                        require(received <= maxArchiveBytes) {
+                            "Embedded runtime archive exceeds the safety size limit"
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                    output.fd.sync()
+                }
+            }
+            require(received > 0L && archive.length() == received) {
+                "Embedded runtime archive copy was empty or incomplete"
+            }
+            val actualHash = sha256(archive)
+            require(actualHash == expectedHash) {
+                "Embedded runtime SHA-256 mismatch (expected $expectedHash, got $actualHash)"
+            }
+            onProgress("Embedded runtime SHA-256 verified; validating XZ and staging privately")
+            val installed = RuntimeBundleInstaller(appContext).install(archive, expectedHash)
+            marker.parentFile?.mkdirs()
+            marker.writeText(expectedHash)
+            onProgress("Runtime checksum যাচাই ও private staging সম্পন্ন")
+            return installed
+        } finally {
             archive.delete()
         }
     }
