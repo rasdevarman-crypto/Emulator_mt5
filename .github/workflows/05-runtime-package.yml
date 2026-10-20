@@ -135,16 +135,26 @@ jobs:
           # Enumerate files from the runner outside chroot. In the previous run,
           # ls/test inside chroot saw Wine but find inside chroot returned ENOENT
           # for the same path; host-side enumeration avoids that inconsistency.
-          sudo find bundle/rootfs/opt/wine-11.0-wow64 -type f -printf '/opt/wine-11.0-wow64/%P\\n' > bundle/rootfs/tmp/wine-files.txt
+          sudo find bundle/rootfs/opt/wine-11.0-wow64 -type f -printf '/opt/wine-11.0-wow64/%P\n' > bundle/rootfs/tmp/wine-files.txt
           sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
+            echo "=== Runtime identity and APT permissions (diagnostic) ==="
+            id
+            stat -c "%A %a %U:%G %n" /var/cache/apt/archives /var/lib/apt/lists
             echo "=== Wine path inside chroot ==="
             ls -ld /opt /opt/wine-11.0-wow64 /opt/wine-11.0-wow64/bin
             ls -l /opt/wine-11.0-wow64/bin/wine
             test -x /opt/wine-11.0-wow64/bin/wine
             test -d /opt/wine-11.0-wow64/lib
+            echo "=== Wine file-list diagnostic ==="
+            wc -l /tmp/wine-files.txt
+            sed -n "1,5p" /tmp/wine-files.txt
             export LD_LIBRARY_PATH="/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/opt/wine-11.0-wow64/lib/wine/i386-unix:/opt/wine-11.0-wow64/lib:\${LD_LIBRARY_PATH:-}"
             while IFS= read -r f; do
               [[ -n "$f" ]] || continue
+              if [[ ! -f "$f" ]]; then
+                printf "Listed Wine file does not exist inside chroot: <%s>\\n" "$f" >&2
+                exit 1
+              fi
               if file "$f" | grep -q ELF; then
                 deps="$(ldd "$f" 2>&1 || true)"
                 if grep -q "not found" <<< "$deps"; then
