@@ -214,7 +214,7 @@ jobs:
           rm -rf build/wine-extract build/wine-output build/box64-output build/arm64-rootfs build/runtime-sources
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
-          du -sh bundle bundle/rootfs bundle/rootfs-arm64 | tee provenance/package-rootfs-size-before-archive.txt
+          sudo du -sh bundle bundle/rootfs bundle/rootfs-arm64 | tee provenance/package-rootfs-size-before-archive.txt
           df -h "$PWD" | tee provenance/package-disk-space-before-archive.txt
           # Capture capacity immediately before compression; keep xz at one thread.
           df -h "$PWD" | tee provenance/package-disk-space-before-compress.txt
