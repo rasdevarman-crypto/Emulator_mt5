@@ -133,7 +133,7 @@ class MainActivity : Activity() {
                             installed = RuntimeAutoSetup(this).downloadAndInstall { message ->
                                 runOnUiThread {
                                     addLog("Runtime setup: $message")
-                                    val percent = Regex("(?:Download|ডাউনলোড):\\s*(\\d{1,3})%")
+                                    val percent = Regex("(?:Download|ডাউনলোড|Extraction|Install):\\s*(\\d{1,3})%")
                                         .find(message)?.groupValues?.get(1)?.toIntOrNull()
                                     setProgress(message, percent)
                                 }
@@ -307,7 +307,7 @@ class MainActivity : Activity() {
                 val installed = RuntimeAutoSetup(this).downloadAndInstall { message ->
                     runOnUiThread {
                         addLog("Runtime setup: $message")
-                        val percent = Regex("(?:Download|ডাউনলোড):\\s*(\\d{1,3})%").find(message)?.groupValues?.get(1)?.toIntOrNull()
+                        val percent = Regex("(?:Download|ডাউনলোড|Extraction|Install):\\s*(\\d{1,3})%").find(message)?.groupValues?.get(1)?.toIntOrNull()
                         setProgress(message, percent)
                     }
                 }
