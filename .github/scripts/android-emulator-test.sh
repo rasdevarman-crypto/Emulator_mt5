@@ -123,30 +123,50 @@ adb shell dumpsys activity activities > "$RUNNER_TEMP/android-diagnostics/activi
 adb shell dumpsys package "$PACKAGE_NAME" > "$RUNNER_TEMP/android-diagnostics/package.txt" || true
 
 # Inspect the *post-staging* private runtime tree as the app UID.
+# Avoid "run-as ... sh -c": adb's remote-shell quoting can drop the -c payload.
+# Use individual run-as commands with absolute app-private paths instead.
 {
   echo "Post-staging runtime file/permission inspection"
   echo "Captured UTC: $(date -u +%FT%TZ)"
-  adb shell run-as "$PACKAGE_NAME" sh -c '
-    cd files/runtime/bundle || { echo "FAIL: private runtime bundle directory missing"; exit 20; }
-    for p in bin/box64 rootfs-arm64/etc/os-release rootfs-arm64/usr/local/bin/box64 rootfs/etc/os-release rootfs/opt/wine-11.0-wow64/bin/wine; do
-      if [ -f "$p" ]; then
-        if [ -x "$p" ]; then echo "PASS executable/present: $p"; else echo "FAIL not executable: $p"; fi
-        ls -l "$p" 2>&1 || true
+  base="/data/user/0/$PACKAGE_NAME/files/runtime/bundle"
+  if adb shell run-as "$PACKAGE_NAME" test -d "$base"; then
+    echo "PASS private runtime bundle directory present: $base"
+  else
+    echo "FAIL private runtime bundle directory missing: $base"
+  fi
+  for p in bin/box64 rootfs-arm64/etc/os-release rootfs-arm64/usr/local/bin/box64 rootfs/etc/os-release rootfs/opt/wine-11.0-wow64/bin/wine; do
+    full="$base/$p"
+    if adb shell run-as "$PACKAGE_NAME" test -f "$full"; then
+      if adb shell run-as "$PACKAGE_NAME" test -x "$full"; then
+        echo "PASS executable/present: $p"
       else
-        echo "FAIL missing file: $p"
+        echo "FAIL not executable: $p"
+      fi
+      adb shell run-as "$PACKAGE_NAME" ls -l "$full" 2>&1 || true
+    else
+      echo "FAIL missing file: $p"
+    fi
+  done
+  for lib in libfontconfig.so.1 libfreetype.so.6 libbrotlidec.so.1; do
+    found=0
+    for p in "rootfs/lib/x86_64-linux-gnu/$lib" "rootfs/usr/lib/x86_64-linux-gnu/$lib" "rootfs-arm64/lib/aarch64-linux-gnu/$lib" "rootfs-arm64/usr/lib/aarch64-linux-gnu/$lib"; do
+      full="$base/$p"
+      if adb shell run-as "$PACKAGE_NAME" test -e "$full"; then
+        echo "PASS library present: $p"
+        adb shell run-as "$PACKAGE_NAME" ls -l "$full" 2>&1 || true
+        found=1
       fi
     done
-    for lib in libfontconfig.so.1 libfreetype.so.6 libbrotlidec.so.1; do
-      found=0
-      for p in "rootfs/lib/x86_64-linux-gnu/$lib" "rootfs/usr/lib/x86_64-linux-gnu/$lib"; do
-        if [ -e "$p" ]; then echo "PASS library present: $p"; ls -l "$p" 2>&1 || true; found=1; fi
-      done
-      [ "$found" -eq 1 ] || echo "FAIL missing library: $lib"
-    done
-    echo "Manifest:"
-    if [ -f manifest.json ]; then head -c 1200 manifest.json; echo; else echo "FAIL manifest.json missing"; fi
-  ' 2>&1 || echo "WARN: run-as private runtime inspection could not execute"
-} | tee "$RUNNER_TEMP/android-diagnostics/post-staging-runtime-check.txt"
+    [ "$found" -eq 1 ] || echo "FAIL missing library in inspected locations: $lib"
+  done
+  echo "Manifest:"
+  if adb shell run-as "$PACKAGE_NAME" test -f "$base/manifest.json"; then
+    adb shell run-as "$PACKAGE_NAME" cat "$base/manifest.json" 2>&1 | head -c 1200
+    echo
+  else
+    echo "WARN manifest.json not found at bundle root"
+  fi
+} 2>&1 | tee "$RUNNER_TEMP/android-diagnostics/post-staging-runtime-check.txt"
 
 # The final UI retains historical startup messages; inspect only entries after staging.
 python3 - "$RUNNER_TEMP/android-diagnostics/final-ui.xml" "$RUNNER_TEMP/android-diagnostics/post-staging-runtime-check.txt" "$report" <<'PY'
