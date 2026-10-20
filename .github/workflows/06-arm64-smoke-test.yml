@@ -73,10 +73,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Carry forward runtime-bundle-candidate artifact
+      - name: Carry forward runtime-bundle-candidate artifact for Android packaging
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
         with:
           name: runtime-bundle-candidate
-          path: build/runtime-bundle-candidate/
+          path: |
+            build/runtime-bundle-candidate.tar.xz
+            build/runtime-bundle-candidate.tar.xz.sha256
           if-no-files-found: error
           retention-days: 7
