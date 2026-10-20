@@ -1,0 +1,82 @@
+name: 06 ARM64 Runtime Smoke Test
+on:
+  workflow_run:
+    workflows: ["05 Package Runtime Bundle"]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: split-runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  BOX64_COMMIT: "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
+  WINE_VERSION: "11.0"
+  WINE_SHA256: "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
+jobs:
+  arm64-runtime-smoke:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: ARM64 Linux smoke test for Box64 + Wine
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: runtime-bundle-candidate
+          path: build
+      - name: Install host PRoot
+        run: sudo apt-get update && sudo apt-get install -y proot
+      - name: Extract candidate and run Box64/Wine PE smoke tests in dual-rootfs layout
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tar -xJf build/runtime-bundle-candidate.tar.xz
+          test -x bundle/rootfs-arm64/usr/local/bin/box64
+          mkdir -p wine-smoke-prefix
+          host_rootfs="$PWD/bundle/rootfs-arm64"
+          wine_rootfs="$PWD/bundle/rootfs"
+          fixtures="$PWD/provenance/test-fixtures"
+          proot_run() {
+            proot -R "$host_rootfs" \
+              -b "$wine_rootfs:/x86root" \
+              -b "$fixtures:/tests" \
+              -b "$PWD/wine-smoke-prefix:/wineprefix" \
+              /usr/bin/env \
+              BOX64_LD_LIBRARY_PATH=/x86root/lib/x86_64-linux-gnu:/x86root/usr/lib/x86_64-linux-gnu:/x86root/lib64:/x86root/opt/wine-11.0-wow64/lib:/x86root/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/x86root/opt/wine-11.0-wow64/lib/wine/i386-unix \
+              LD_LIBRARY_PATH=/x86root/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/x86root/opt/wine-11.0-wow64/lib/wine/i386-unix:/x86root/opt/wine-11.0-wow64/lib \
+              WINEPREFIX=/wineprefix WINEDEBUG=-all \
+              /usr/local/bin/box64 "$@"
+          }
+          proot_run --version 2>&1 | tee box64-smoke-version.txt
+          proot_run /x86root/opt/wine-11.0-wow64/bin/wine --version 2>&1 | tee wine-under-box64-smoke.txt
+          grep -q 'wine-11.0' wine-under-box64-smoke.txt
+          proot_run /x86root/opt/wine-11.0-wow64/bin/wineboot --init 2>&1 | tee wineboot-smoke.txt
+          proot_run /x86root/opt/wine-11.0-wow64/bin/wine /tests/runtime-smoke-x86_64.exe 2>&1 | tee pe-x86_64-smoke.txt
+          grep -q 'RUNTIME_SMOKE_OK pointer_bits=64' pe-x86_64-smoke.txt
+          proot_run /x86root/opt/wine-11.0-wow64/bin/wine /tests/runtime-smoke-i386.exe 2>&1 | tee pe-i386-smoke.txt
+          grep -q 'RUNTIME_SMOKE_OK pointer_bits=32' pe-i386-smoke.txt
+          sha256sum box64-smoke-version.txt wine-under-box64-smoke.txt wineboot-smoke.txt pe-x86_64-smoke.txt pe-i386-smoke.txt > runtime-smoke.sha256
+      - name: Upload ARM64 smoke-test evidence
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: arm64-runtime-smoke-evidence
+          path: |
+            box64-smoke-version.txt
+            wine-under-box64-smoke.txt
+            wineboot-smoke.txt
+            pe-x86_64-smoke.txt
+            pe-i386-smoke.txt
+            runtime-smoke.sha256
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Carry forward runtime-bundle-candidate artifact
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: runtime-bundle-candidate
+          path: build/runtime-bundle-candidate/
+          if-no-files-found: error
+          retention-days: 7
