@@ -2,13 +2,13 @@ name: 01 Verify Runtime Sources
 on:
   workflow_dispatch:
   push:
-    branches: ["**"]
+    branches: ["main"]
     paths:
       - "scripts/acquire-runtime-sources.sh"
       - ".github/workflows/01-runtime-source-verify.yml"
 permissions:
   contents: read
-  actions: read
+  actions: write
 concurrency:
   group: runtime-build-v2-${{ github.ref }}
   cancel-in-progress: true
@@ -44,4 +44,9 @@ jobs:
             !build/runtime-sources/box64/.git/**
           if-no-files-found: error
           retention-days: 7
+
+      - name: Dispatch Wine build after verified sources are uploaded
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run 02-wine-build.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f upstream_run_id="$GITHUB_RUN_ID"
 
