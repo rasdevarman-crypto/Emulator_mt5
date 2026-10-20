@@ -69,6 +69,13 @@ class MainActivity : Activity() {
         }
         root.addView(launchMt5Button, params())
         root.addView(Button(this).apply {
+            text = "MT5 Installer নির্বাচন করুন"
+            setOnClickListener {
+                addLog("ব্যবহারকারী আলাদাভাবে MT5 installer নির্বাচন চেয়েছেন।")
+                chooseInstaller()
+            }
+        }, params())
+        root.addView(Button(this).apply {
             text = "Runtime Download / Install"
             setOnClickListener { downloadVerifiedRuntime() }
         }, params())
@@ -217,8 +224,9 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Single-button flow: install the embedded verified runtime if absent; once ready,
-     * open the installer picker if MT5 is not installed; otherwise launch MT5.
+     * Launch action must never open the Android document picker.
+     * Install the embedded runtime if absent; launch MT5 only when it is installed.
+     * Installer selection is a separate, explicitly labelled user action.
      */
     private fun launchWindowsOneTap() {
         launchMt5Button.isEnabled = false
@@ -243,7 +251,7 @@ class MainActivity : Activity() {
                     runOnUiThread {
                         addLog("Runtime checksum যাচাই ও private staging সম্পন্ন: ${installed.absolutePath}")
                         refreshRuntimeStatus()
-                        addLog("এখন আবার ‘Windows চালু করুন’ চাপুন; MT5 ইনস্টল না থাকলে installer নির্বাচন খুলবে।")
+                        addLog("Runtime প্রস্তুত। MT5 চালু করতে আলাদা MT5 installer নির্বাচন করে ইনস্টল সম্পন্ন করুন; Windows চালু করুন বাটন ফাইল পিকার খুলবে না।")
                     }
                     return@Thread
                 }
@@ -251,9 +259,11 @@ class MainActivity : Activity() {
                 val mt5 = try { runtimeManager.mt5Executable() } catch (_: Exception) { null }
                 if (mt5 == null) {
                     runOnUiThread {
-                        addLog("Runtime প্রস্তুত। Windows/MT5 প্রথমবার ইনস্টল করতে MT5 installer (.exe) নির্বাচন করুন।")
+                        val message = "MT5 ইনস্টল করা নেই। আলাদা ‘MT5 Installer নির্বাচন করুন’ বাটন দিয়ে installer (.exe) নির্বাচন করুন।"
+                        addLog(message)
+                        status.text = "অবস্থা: runtime প্রস্তুত; MT5 ইনস্টল করা নেই"
+                        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                         launchMt5Button.isEnabled = true
-                        chooseInstaller()
                     }
                 } else {
                     val process = runtimeManager.launchMt5 { line -> runOnUiThread { addLog("Wine: $line") } }
