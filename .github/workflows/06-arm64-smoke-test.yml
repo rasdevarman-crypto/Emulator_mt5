@@ -1,10 +1,14 @@
 name: 06 ARM64 Runtime Smoke Test
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/06-arm64-smoke-test.yml"
   workflow_dispatch:
     inputs:
       upstream_run_id:
-        description: Successful runtime-bundle packaging run ID
-        required: true
+        description: Successful runtime-bundle packaging run ID (auto-select latest on blank)
+        required: false
         type: string
 permissions:
   contents: read
@@ -22,9 +26,24 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
+      - name: Resolve successful runtime package run
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.upstream_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_id="$REQUESTED_RUN_ID"
+          if [[ -z "$run_id" ]]; then
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow 05-runtime-package.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          fi
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "No successful runtime package run ID found: '$run_id'" >&2; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Using successful runtime package run: $run_id"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: runtime-bundle-candidate
           path: build
@@ -34,7 +53,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          tar -xJf build/runtime-bundle-candidate.tar.xz
+          # Runtime rootfs archives include device nodes. Hosted runners cannot
+          # create them during extraction; proot -R supplies its own /dev bindings.
+          tar --exclude='bundle/rootfs/dev/*' --exclude='bundle/rootfs-arm64/dev/*' -xJf build/runtime-bundle-candidate.tar.xz
           test -x bundle/rootfs-arm64/usr/local/bin/box64
           mkdir -p wine-smoke-prefix
           host_rootfs="$PWD/bundle/rootfs-arm64"
