@@ -18,7 +18,10 @@ import java.io.File
 class RuntimeManager(context: Context) {
     private val appContext = context.applicationContext
     private val runtimeDir = File(appContext.filesDir, "runtime")
-    private val proot = File(runtimeDir, "proot/bin/proot")
+    // Execute the Android/Bionic ELF from PackageManager's native-library directory, not
+    // writable filesDir. Android may reject execve() from app-writable storage with EACCES
+    // even after chmod(0755).
+    private val proot = File(appContext.applicationInfo.nativeLibraryDir, "libproot.so")
     private val bundle = File(runtimeDir, "bundle")
     private val hostRoot = File(bundle, "rootfs-arm64")
     private val wineRoot = File(bundle, "rootfs")
@@ -146,25 +149,26 @@ class RuntimeManager(context: Context) {
 
 
     private fun ensureBundledProot() {
+        if (!proot.isFile || !proot.canExecute()) {
+            throw IllegalStateException(
+                "Android-native PRoot is missing or not executable in nativeLibraryDir: " +
+                    "${proot.absolutePath}; exists=${proot.isFile}; readable=${proot.canRead()}; " +
+                    "executable=${proot.canExecute()}. Rebuild with libproot.so in jniLibs/arm64-v8a " +
+                    "and android:extractNativeLibs=true."
+            )
+        }
+        // PRoot guest-loader helpers are data assets. Keep the main executable in
+        // nativeLibraryDir rather than executing it from writable app-private storage.
         val destination = File(runtimeDir, "proot")
         val marker = File(destination, ".asset-installed")
-        if (marker.isFile && proot.isFile && proot.canExecute()) return
+        val loader = File(destination, "libexec/proot/loader")
+        if (marker.isFile && loader.isFile) return
         val entries = appContext.assets.list("runtime/proot")
             ?: throw IllegalStateException("APK has no runtime/proot assets")
-        if (entries.isEmpty()) throw IllegalStateException("APK has no bundled PRoot files")
+        if (entries.isEmpty()) throw IllegalStateException("APK has no bundled PRoot helper assets")
         if (destination.exists()) destination.deleteRecursively()
         copyAssetTree("runtime/proot", destination)
-        try {
-            // Asset extraction does not preserve Unix mode bits. Restore executable mode
-            // explicitly before attempting ProcessBuilder.exec on Android.
-            android.system.Os.chmod(proot.absolutePath, 0b111101101) // 0755
-        } catch (e: Exception) {
-            throw IllegalStateException("PRoot chmod 0755 failed at ${proot.absolutePath}: ${e.message}", e)
-        }
-        if (!proot.setExecutable(true, false) || !proot.canExecute()) {
-            throw IllegalStateException("Could not mark bundled PRoot executable: path=${proot.absolutePath}, readable=${proot.canRead()}, executable=${proot.canExecute()}")
-        }
-        marker.writeText("source=APK asset; chmod=0755; Android arm64 PRoot candidate")
+        marker.writeText("source=APK assets; executable=${proot.absolutePath}; main ELF in nativeLibraryDir")
     }
 
     private fun copyAssetTree(assetPath: String, destination: File) {
