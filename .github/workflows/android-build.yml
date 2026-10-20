@@ -91,16 +91,34 @@ jobs:
           git clone https://github.com/berilevi/proot-static.git proot-static
           git -C proot-static checkout 6f8ebfd8e24887dfba64c3f2d7d5fe9dc059b60e
           cd proot-static
+          # The pinned helper's build logic supports both NDK target triples; widen its ABI guard.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("tools/build-static-aarch64.sh")
+          source = p.read_text()
+          old = 'if [[ "$ARCH" != "aarch64" ]]; then'
+          new = 'if [[ "$ARCH" != "aarch64" && "$ARCH" != "x86_64" ]]; then'
+          assert old in source, "Pinned PRoot helper ABI guard changed"
+          p.write_text(source.replace(old, new, 1))
+          PY
           NDK="$ANDROID_HOME/ndk/28.2.13676358" OUT="$RUNNER_TEMP/proot-build" REPO_ARTIFACT_DIR="$RUNNER_TEMP/proot-dist" tools/build-static-aarch64.sh
+          ARCH=x86_64 API=21 NDK="$ANDROID_HOME/ndk/28.2.13676358" OUT="$RUNNER_TEMP/proot-build-x86_64" REPO_ARTIFACT_DIR="$RUNNER_TEMP/proot-dist-x86_64" tools/build-static-aarch64.sh
           cd "$GITHUB_WORKSPACE"
-          mkdir -p app/src/main/assets/runtime/proot app/src/main/jniLibs/arm64-v8a
+          mkdir -p app/src/main/assets/runtime/proot app/src/main/jniLibs/arm64-v8a app/src/main/jniLibs/x86_64
           cp -a "$RUNNER_TEMP/proot-build/root/." app/src/main/assets/runtime/proot/
-          # Package the standalone Android/Bionic executable as an extracted native-library
-          # payload so execve does not target writable filesDir (which may be noexec/EACCES).
-          install -m 0755 "$RUNNER_TEMP/proot-build/root/bin/proot" app/src/main/jniLibs/arm64-v8a/libproot.so
-          test -x app/src/main/jniLibs/arm64-v8a/libproot.so
-          readelf -h app/src/main/jniLibs/arm64-v8a/libproot.so | tee /tmp/proot-elf.txt
-          grep -q AArch64 /tmp/proot-elf.txt
+          # Package both ABIs under nativeLibraryDir so execve never targets writable filesDir.
+          install -m 0755 "$RUNNER_TEMP/proot-dist/proot" app/src/main/jniLibs/arm64-v8a/libproot.so
+          install -m 0755 "$RUNNER_TEMP/proot-dist/loader" app/src/main/jniLibs/arm64-v8a/libproot_loader.so
+          if test -f "$RUNNER_TEMP/proot-dist/loader32"; then install -m 0755 "$RUNNER_TEMP/proot-dist/loader32" app/src/main/jniLibs/arm64-v8a/libproot_loader32.so; fi
+          install -m 0755 "$RUNNER_TEMP/proot-dist-x86_64/proot" app/src/main/jniLibs/x86_64/libproot.so
+          install -m 0755 "$RUNNER_TEMP/proot-dist-x86_64/loader" app/src/main/jniLibs/x86_64/libproot_loader.so
+          if test -f "$RUNNER_TEMP/proot-dist-x86_64/loader32"; then install -m 0755 "$RUNNER_TEMP/proot-dist-x86_64/loader32" app/src/main/jniLibs/x86_64/libproot_loader32.so; fi
+          readelf -h app/src/main/jniLibs/arm64-v8a/libproot.so | tee /tmp/proot-arm64-elf.txt
+          grep -q AArch64 /tmp/proot-arm64-elf.txt
+          readelf -h app/src/main/jniLibs/arm64-v8a/libproot_loader.so | grep -q AArch64
+          readelf -h app/src/main/jniLibs/x86_64/libproot.so | tee /tmp/proot-x86_64-elf.txt
+          grep -q 'X86-64' /tmp/proot-x86_64-elf.txt
+          readelf -h app/src/main/jniLibs/x86_64/libproot_loader.so | grep -q 'X86-64'
           sha256sum app/src/main/jniLibs/arm64-v8a/libproot.so | tee app/src/main/assets/runtime/proot/proot.sha256
 
       - name: Build debug APK
