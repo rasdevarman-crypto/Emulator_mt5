@@ -21,7 +21,10 @@ class RuntimeManager(context: Context) {
     // Execute the Android/Bionic ELF from PackageManager's native-library directory, not
     // writable filesDir. Android may reject execve() from app-writable storage with EACCES
     // even after chmod(0755).
-    private val proot = File(appContext.applicationInfo.nativeLibraryDir, "libproot.so")
+    private val nativeLibDir = File(appContext.applicationInfo.nativeLibraryDir)
+    private val proot = File(nativeLibDir, "libproot.so")
+    private val prootLoader = File(nativeLibDir, "libproot_loader.so")
+    private val prootLoader32 = File(nativeLibDir, "libproot_loader32.so")
     private val bundle = File(runtimeDir, "bundle")
     private val hostRoot = File(bundle, "rootfs-arm64")
     private val wineRoot = File(bundle, "rootfs")
@@ -69,6 +72,20 @@ class RuntimeManager(context: Context) {
         return Preflight(true, "Runtime files found. Android GUI/display compatibility is not validated.")
     }
 
+    private fun startProot(command: List<String>): Process {
+        val tempDir = File(appContext.cacheDir, "proot-tmp")
+        if (!tempDir.exists() && !tempDir.mkdirs()) {
+            throw IllegalStateException("Could not create PRoot temporary directory: ${tempDir.absolutePath}")
+        }
+        return ProcessBuilder(command).apply {
+            environment()["PROOT_LOADER"] = prootLoader.absolutePath
+            if (prootLoader32.isFile && prootLoader32.canExecute()) {
+                environment()["PROOT_LOADER_32"] = prootLoader32.absolutePath
+            }
+            environment()["PROOT_TMP_DIR"] = tempDir.absolutePath
+        }.redirectErrorStream(true).start()
+    }
+
     fun launchInstaller(installer: File, onLine: (String) -> Unit): Process {
         val preflightResult = preflight()
         check(preflightResult.ready) { preflightResult.message }
@@ -94,7 +111,7 @@ class RuntimeManager(context: Context) {
             "/x86root/opt/wine-11.0-wow64/bin/wine",
             "/installer.exe"
         )
-        return ProcessBuilder(command).redirectErrorStream(true).start().also { process ->
+        return startProot(command).also { process ->
             Thread({
                 process.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line -> onLine(line.take(2000)) }
@@ -128,7 +145,7 @@ class RuntimeManager(context: Context) {
             "/x86root/opt/wine-11.0-wow64/bin/wine",
             "/wineprefix/drive_c/Program Files/MetaTrader 5/${executable.name}"
         )
-        return ProcessBuilder(command).redirectErrorStream(true).start().also { process ->
+        return startProot(command).also { process ->
             Thread({
                 process.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line -> onLine(line.take(2000)) }
@@ -153,8 +170,12 @@ class RuntimeManager(context: Context) {
             throw IllegalStateException(
                 "Android-native PRoot is missing or not executable in nativeLibraryDir: " +
                     "${proot.absolutePath}; exists=${proot.isFile}; readable=${proot.canRead()}; " +
-                    "executable=${proot.canExecute()}. Rebuild with libproot.so in jniLibs/arm64-v8a " +
-                    "and android:extractNativeLibs=true."
+                    "executable=${proot.canExecute()}. APK must include an ABI-matched libproot.so."
+            )
+        }
+        if (!prootLoader.isFile || !prootLoader.canExecute()) {
+            throw IllegalStateException(
+                "PRoot guest loader is missing or not executable in nativeLibraryDir: ${prootLoader.absolutePath}"
             )
         }
         // PRoot guest-loader helpers are data assets. Keep the main executable in
