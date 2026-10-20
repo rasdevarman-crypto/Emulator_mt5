@@ -52,6 +52,18 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: runtime-bundle-candidate
           path: build
+      - name: Verify candidate archive checksum and XZ integrity before extraction
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd build
+          test -s runtime-bundle-candidate.tar.xz
+          test -s runtime-bundle-candidate.tar.xz.sha256
+          sha256sum -c runtime-bundle-candidate.tar.xz.sha256
+          xz -t runtime-bundle-candidate.tar.xz
+          tar -tJf runtime-bundle-candidate.tar.xz | grep -Fx 'bundle/manifest.json' >/dev/null
+          echo "Candidate archive SHA-256 and XZ integrity passed."
+
       - name: Extract candidate and run Box64/Wine PE smoke tests on ARM64 host
         shell: bash
         run: |
@@ -60,6 +72,9 @@ jobs:
           # native ARM64 process can fault when PRoot intercepts its SIGSEGV-based
           # dynarec handling. Run it natively inside the ARM64 rootfs using chroot.
           tar --exclude='bundle/rootfs/dev/*' --exclude='bundle/rootfs-arm64/dev/*' -xJf build/runtime-bundle-candidate.tar.xz
+          jq -e '.schema_version == 1 and .target_android_abi == "arm64-v8a" and .status == "candidate" and .box64.sha256 and .wine.sha256' bundle/manifest.json >/dev/null
+          bash scripts/check-runtime-bundle.sh bundle
+          bash scripts/verify-runtime-provenance.sh bundle
           host_rootfs="$PWD/bundle/rootfs-arm64"
           wine_rootfs="$PWD/bundle/rootfs"
           fixtures="$PWD/provenance/test-fixtures"
@@ -94,6 +109,40 @@ jobs:
           runtime_run /x86root/opt/wine-11.0-wow64/bin/wine /tests/runtime-smoke-i386.exe 2>&1 | tee pe-i386-smoke.txt
           grep -q 'RUNTIME_SMOKE_OK pointer_bits=32' pe-i386-smoke.txt
           sha256sum box64-smoke-version.txt wine-under-box64-smoke.txt wineboot-smoke.txt pe-x86_64-smoke.txt pe-i386-smoke.txt > runtime-smoke.sha256
+      - name: Promote manifest only after every ARM64 smoke assertion passes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p bundle/provenance/arm64-smoke-evidence
+          cp box64-smoke-version.txt wine-under-box64-smoke.txt wineboot-smoke.txt \
+            pe-x86_64-smoke.txt pe-i386-smoke.txt runtime-smoke.sha256 \
+            bundle/provenance/arm64-smoke-evidence/
+          (cd bundle/provenance/arm64-smoke-evidence && sha256sum -c runtime-smoke.sha256)
+          jq --arg run_id "$GITHUB_RUN_ID" --arg commit "$GITHUB_SHA" '
+            .status = "arm64-smoke-tested"
+            | .verification = ((.verification // {}) + {
+                bundle_checksum: true,
+                arm64_smoke_test: true,
+                physical_android_mt5_test: false
+              })
+            | .arm64_smoke_test = {
+                result: "passed",
+                workflow_run_id: $run_id,
+                source_commit: $commit,
+                evidence_dir: "provenance/arm64-smoke-evidence"
+              }
+            | .notes = "ARM64 Linux Box64/Wine smoke tests passed in CI. This does not establish physical Android GUI or MT5 compatibility."
+          ' bundle/manifest.json > bundle/manifest.json.tmp
+          mv bundle/manifest.json.tmp bundle/manifest.json
+          bash scripts/check-runtime-bundle.sh bundle
+          bash scripts/verify-runtime-provenance.sh bundle
+          rm -f build/runtime-bundle-candidate.tar.xz build/runtime-bundle-candidate.tar.xz.sha256
+          tar --numeric-owner -cf - bundle provenance | xz -T1 -0 > build/runtime-bundle-candidate.tar.xz.partial
+          mv build/runtime-bundle-candidate.tar.xz.partial build/runtime-bundle-candidate.tar.xz
+          xz -t build/runtime-bundle-candidate.tar.xz
+          (cd build && sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256 && sha256sum -c runtime-bundle-candidate.tar.xz.sha256)
+          tar -xOf build/runtime-bundle-candidate.tar.xz bundle/manifest.json | jq -e '.status == "arm64-smoke-tested" and .verification.arm64_smoke_test == true and .verification.physical_android_mt5_test == false' >/dev/null
+          echo "Manifest lifecycle updated: ARM64 smoke passed; physical Android/MT5 remains unverified."
       - name: Upload ARM64 smoke-test evidence
         if: always()
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
