@@ -142,6 +142,9 @@ class RuntimeManager(context: Context) {
             "BOX64_LD_LIBRARY_PATH=$ldPath",
             "WINEPREFIX=/wineprefix",
             "WINEDEBUG=-all",
+            // PRoot intercepts signals used by Box64 dynarec; disable dynarec in this
+            // experimental Android path to avoid the observed PRoot SIGSEGV crash.
+            "BOX64_DYNAREC=0",
             "/usr/local/bin/box64",
             "/x86root/opt/wine-11.0-wow64/bin/wine",
             "/installer.exe"
@@ -176,6 +179,9 @@ class RuntimeManager(context: Context) {
             "BOX64_LD_LIBRARY_PATH=$ldPath",
             "WINEPREFIX=/wineprefix",
             "WINEDEBUG=-all",
+            // PRoot intercepts signals used by Box64 dynarec; disable dynarec in this
+            // experimental Android path to avoid the observed PRoot SIGSEGV crash.
+            "BOX64_DYNAREC=0",
             "/usr/local/bin/box64",
             "/x86root/opt/wine-11.0-wow64/bin/wine",
             "/wineprefix/drive_c/Program Files/MetaTrader 5/${executable.name}"
