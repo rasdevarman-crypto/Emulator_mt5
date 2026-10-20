@@ -206,18 +206,43 @@ jobs:
           [[ -n "$box64_version" ]] || box64_version="Box64 v0.4.4 (version output recorded in provenance)"
           box64_sha="$(sha256sum bundle/bin/box64 | awk '{print $1}')"
           wine_sha="$(sha256sum bundle/bin/wine | awk '{print $1}')"
-          jq -n             --arg box64_version "$box64_version"             --arg box64_sha "$box64_sha"             --arg wine_version "$wine_version"             --arg wine_sha "$wine_sha"             --arg box64_source "https://github.com/ptitSeb/box64"             --arg wine_source "https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz"             --arg box64_commit "$BOX64_COMMIT"             --arg wine_archive_sha "$WINE_SHA256"             '{
+          jq -n \
+            --arg box64_version "$box64_version" \
+            --arg box64_sha "$box64_sha" \
+            --arg wine_version "$wine_version" \
+            --arg wine_sha "$wine_sha" \
+            --arg box64_source "https://github.com/ptitSeb/box64" \
+            --arg wine_source "https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz" \
+            --arg box64_commit "$BOX64_COMMIT" \
+            --arg wine_archive_sha "$WINE_SHA256" \
+            --arg package_run_id "$GITHUB_RUN_ID" \
+            --arg package_commit "$GITHUB_SHA" \
+            --arg rootfs_run_id "${{ steps.resolve.outputs.run_id }}" \
+            '{
               schema_version: 1,
               status: "candidate",
               target_android_abi: "arm64-v8a",
+              verification: {
+                pinned_sources: true,
+                wine_build: true,
+                bundle_checksum: false,
+                arm64_smoke_test: false,
+                physical_android_mt5_test: false
+              },
+              package_provenance: {
+                workflow_run_id: $package_run_id,
+                source_commit: $package_commit,
+                arm64_rootfs_workflow_run_id: $rootfs_run_id
+              },
               box64: {path:"bin/box64", version:$box64_version, source_url:$box64_source, source_commit:$box64_commit, sha256:$box64_sha},
               wine: {path:"bin/wine", version:$wine_version, source_url:$wine_source, source_archive_sha256:$wine_archive_sha, sha256:$wine_sha},
               rootfs_path:"rootfs",
               rootfs:{distribution:"Ubuntu", version:"24.04", architecture:"amd64", packages_file:"provenance/rootfs-apt-packages.txt"},
               host_rootfs_path:"rootfs-arm64",
               host_rootfs:{distribution:"Ubuntu", version:"24.04", architecture:"arm64", packages_file:"provenance/arm64-rootfs-apt-packages.txt"},
-              notes:"Experimental candidate assembled by CI. Not yet Android-device or MT5 validated; candidate status is not a compatibility claim."
+              notes:"Candidate assembled by CI. Status advances to arm64-smoke-tested only after checksum, manifest, provenance, and ARM64 Linux smoke assertions pass. Physical Android/MT5 compatibility remains separate."
             }' > bundle/manifest.json
+          jq -e '.schema_version == 1 and .status == "candidate" and .target_android_abi == "arm64-v8a" and .verification.arm64_smoke_test == false and .verification.physical_android_mt5_test == false and (.package_provenance.workflow_run_id | length > 0)' bundle/manifest.json >/dev/null
           bash scripts/check-runtime-bundle.sh bundle
           bash scripts/verify-runtime-provenance.sh bundle
           # Keep the runtime libraries and provenance, but remove Ubuntu package
