@@ -125,8 +125,6 @@ class RuntimeBundleInstaller(context: Context) {
                                 }
                                 Os.symlink(safeLink, output.absolutePath)
                             } else if (entry.isFile) {
-                                totalBytes += entry.size
-                                require(totalBytes <= maxExpandedBytes) { "Runtime archive exceeds expanded size limit" }
                                 output.parentFile?.let { if (!it.exists() && !it.mkdirs()) throw IllegalStateException("Could not create file parent") }
                                 require(!output.exists()) { "Duplicate runtime archive path: ${output.path}" }
                                 output.outputStream().use { out ->
@@ -139,7 +137,7 @@ class RuntimeBundleInstaller(context: Context) {
                                         val percent = ((totalBytes * 100L) / totalFileBytes).toInt().coerceIn(0, 100)
                                         if (percent != lastReportedPercent) {
                                             lastReportedPercent = percent
-                                            onProgress("Extraction: $percent% (\${totalBytes / (1024 * 1024)} MiB)")
+                                            onProgress("Extraction: $percent% (${totalBytes / (1024 * 1024)} MiB)")
                                         }
                                     }
                                 }
