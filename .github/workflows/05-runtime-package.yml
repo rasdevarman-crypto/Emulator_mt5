@@ -132,16 +132,19 @@ jobs:
           sudo ls -ld bundle/rootfs/opt bundle/rootfs/opt/wine-11.0-wow64 bundle/rootfs/opt/wine-11.0-wow64/bin
           sudo ls -l bundle/rootfs/opt/wine-11.0-wow64/bin/wine
           sudo test -x bundle/rootfs/opt/wine-11.0-wow64/bin/wine
+          # Enumerate files from the runner outside chroot. In the previous run,
+          # ls/test inside chroot saw Wine but find inside chroot returned ENOENT
+          # for the same path; host-side enumeration avoids that inconsistency.
+          sudo find bundle/rootfs/opt/wine-11.0-wow64 -type f -printf '/opt/wine-11.0-wow64/%P\\n' > bundle/rootfs/tmp/wine-files.txt
           sudo chroot "$PWD/bundle/rootfs" /bin/bash -euxc '
             echo "=== Wine path inside chroot ==="
             ls -ld /opt /opt/wine-11.0-wow64 /opt/wine-11.0-wow64/bin
             ls -l /opt/wine-11.0-wow64/bin/wine
             test -x /opt/wine-11.0-wow64/bin/wine
             test -d /opt/wine-11.0-wow64/lib
-            # Wine Unix modules depend on sibling modules (e.g. crypt32.so -> ntdll.so).
-            # ldd needs Wine's private module directories in its search path.
             export LD_LIBRARY_PATH="/opt/wine-11.0-wow64/lib/wine/x86_64-unix:/opt/wine-11.0-wow64/lib/wine/i386-unix:/opt/wine-11.0-wow64/lib:\${LD_LIBRARY_PATH:-}"
-            while IFS= read -r -d "" f; do
+            while IFS= read -r f; do
+              [[ -n "$f" ]] || continue
               if file "$f" | grep -q ELF; then
                 deps="$(ldd "$f" 2>&1 || true)"
                 if grep -q "not found" <<< "$deps"; then
@@ -149,10 +152,11 @@ jobs:
                   exit 1
                 fi
               fi
-            done < <(find /opt/wine-11.0-wow64 -type f -print0)
+            done < /tmp/wine-files.txt
             apt-get clean
             rm -rf /var/lib/apt/lists/*
           '
+          sudo rm -f bundle/rootfs/tmp/wine-files.txt
           sudo cp bundle/rootfs/tmp/runtime-apt-packages.txt provenance/rootfs-apt-packages.txt
           mkdir -p bundle/provenance
           cp provenance/rootfs-apt-packages.txt bundle/provenance/rootfs-apt-packages.txt
