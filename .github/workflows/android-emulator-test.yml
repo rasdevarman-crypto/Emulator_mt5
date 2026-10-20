@@ -137,7 +137,7 @@ jobs:
             echo "::warning::Android emulator package install attempt $attempt failed; clearing incomplete emulator/system-image downloads."
             rm -rf "$ANDROID_HOME/system-images/android-35/google_apis/x86_64"
             rm -rf "$ANDROID_HOME/emulator"
-            find "$ANDROID_HOME/.temp" -maxdepth 1 -type f \\( -iname '*emulator*' -o -iname '*system-image*' -o -iname '*google_apis*' \\) -delete 2>/dev/null || true
+            find "$ANDROID_HOME/.temp" -maxdepth 1 -type f \( -iname '*emulator*' -o -iname '*system-image*' -o -iname '*google_apis*' \) -delete 2>/dev/null || true
             sleep $((attempt * 5))
           done
           echo "::error::Could not prepare Android API 35 emulator packages after three attempts."
