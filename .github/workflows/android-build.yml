@@ -74,6 +74,22 @@ jobs:
           bash -n scripts/verify-runtime-provenance.sh
           jq empty runtime/runtime-manifest.example.json
 
+      - name: Validate Android runtime diagnostic guardrails
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sh -n .github/scripts/android-emulator-test.sh
+          grep -q 'Windows launch button intentionally NOT tapped' .github/scripts/android-emulator-test.sh
+          if grep -Eq 'adb shell input tap.*Windows|adb shell input tap.*launch' .github/scripts/android-emulator-test.sh; then
+            echo "::error::Android diagnostics must never tap the Windows/MT5 launch button."
+            exit 1
+          fi
+          grep -q 'libfontconfig.so.1' app/src/main/java/com/ras/mt5runner/RuntimeManager.kt
+          grep -q 'libfreetype.so.6' app/src/main/java/com/ras/mt5runner/RuntimeManager.kt
+          grep -q 'libbrotlidec.so.1' app/src/main/java/com/ras/mt5runner/RuntimeManager.kt
+          grep -q 'manifest status=' app/src/main/java/com/ras/mt5runner/RuntimeManager.kt
+          echo "Runtime dependency, manifest and no-MT5-autolaunch guardrails validated."
+
       - name: Set up Android NDK for native PRoot
         shell: bash
         run: |
