@@ -106,6 +106,8 @@ jobs:
 
       - name: Run Android API 35 Emulator install, launch, runtime and PRoot checks
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APK_PATH: ${{ steps.apk.outputs.path }}
         with:
           api-level: 35
           target: google_apis
