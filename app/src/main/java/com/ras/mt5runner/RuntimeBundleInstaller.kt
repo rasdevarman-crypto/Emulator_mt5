@@ -19,8 +19,15 @@ class RuntimeBundleInstaller(context: Context) {
     private val maxExpandedBytes = 8L * 1024L * 1024L * 1024L
     private val maxEntries = 300_000
 
-    fun install(archive: File): File {
+    fun install(archive: File, expectedSha256: String? = null): File {
         require(archive.isFile && archive.canRead()) { "Runtime archive is not readable" }
+        expectedSha256?.let { expected ->
+            require(expected.matches(Regex("[a-fA-F0-9]{64}"))) { "Expected runtime SHA-256 is malformed" }
+            val actual = sha256(archive)
+            require(actual.equals(expected, ignoreCase = true)) {
+                "Runtime SHA-256 mismatch before extraction (expected $expected, got $actual)"
+            }
+        }
         require(archive.length() >= 6L) { "Runtime archive is empty or truncated" }
         val magic = ByteArray(6)
         FileInputStream(archive).use { input ->
