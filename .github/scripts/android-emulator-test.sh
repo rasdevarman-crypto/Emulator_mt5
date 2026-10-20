@@ -122,6 +122,65 @@ fi
 adb shell dumpsys activity activities > "$RUNNER_TEMP/android-diagnostics/activities.txt" || true
 adb shell dumpsys package "$PACKAGE_NAME" > "$RUNNER_TEMP/android-diagnostics/package.txt" || true
 
+# Inspect the *post-staging* private runtime tree as the app UID.
+{
+  echo "Post-staging runtime file/permission inspection"
+  echo "Captured UTC: $(date -u +%FT%TZ)"
+  adb shell run-as "$PACKAGE_NAME" sh -c '
+    cd files/runtime/bundle || { echo "FAIL: private runtime bundle directory missing"; exit 20; }
+    for p in bin/box64 rootfs-arm64/etc/os-release rootfs-arm64/usr/local/bin/box64 rootfs/etc/os-release rootfs/opt/wine-11.0-wow64/bin/wine; do
+      if [ -f "$p" ]; then
+        if [ -x "$p" ]; then echo "PASS executable/present: $p"; else echo "FAIL not executable: $p"; fi
+        ls -l "$p" 2>&1 || true
+      else
+        echo "FAIL missing file: $p"
+      fi
+    done
+    for lib in libfontconfig.so.1 libfreetype.so.6 libbrotlidec.so.1; do
+      found=0
+      for p in "rootfs/lib/x86_64-linux-gnu/$lib" "rootfs/usr/lib/x86_64-linux-gnu/$lib"; do
+        if [ -e "$p" ]; then echo "PASS library present: $p"; ls -l "$p" 2>&1 || true; found=1; fi
+      done
+      [ "$found" -eq 1 ] || echo "FAIL missing library: $lib"
+    done
+    echo "Manifest:"
+    if [ -f manifest.json ]; then head -c 1200 manifest.json; echo; else echo "FAIL manifest.json missing"; fi
+  ' 2>&1 || echo "WARN: run-as private runtime inspection could not execute"
+} | tee "$RUNNER_TEMP/android-diagnostics/post-staging-runtime-check.txt"
+
+# The final UI retains historical startup messages; inspect only entries after staging.
+python3 - "$RUNNER_TEMP/android-diagnostics/final-ui.xml" "$RUNNER_TEMP/android-diagnostics/post-staging-runtime-check.txt" "$report" <<'PY'
+import re, sys, xml.etree.ElementTree as ET
+ui_path, files_path, report_path = sys.argv[1:]
+try:
+    root = ET.parse(ui_path).getroot()
+    log_text = "\\n".join(n.attrib.get("text", "") for n in root.iter("node"))
+except Exception as e:
+    log_text = ""
+    with open(report_path, "a") as out: out.write(f"Post-staging UI log parse failed: {e}\\n")
+marker = "Verified runtime private staging complete:"
+post = log_text.rsplit(marker, 1)[-1] if marker in log_text else ""
+preflight = re.findall(r"Post-install PRoot/runtime preflight: ([^\\n]+)", post)
+smoke_ok = any("Runtime files and observed Wine dependencies found" in x for x in preflight)
+with open(report_path, "a") as out:
+    out.write("Post-staging PRoot --version/preflight evidence: " +
+              ("PASS (app reports runtime files and observed Wine dependencies found)\\n" if smoke_ok else
+               "NOT CONFIRMED (post-install preflight success message absent)\\n"))
+    if preflight: out.write("Post-staging preflight detail: " + preflight[-1] + "\\n")
+with open(files_path, "r", errors="replace") as f: checks = f.read()
+with open(report_path, "a") as out:
+    for lib in ("libfontconfig.so.1", "libfreetype.so.6", "libbrotlidec.so.1"):
+        if re.search(r"PASS library present: .*" + re.escape(lib), checks):
+            out.write(f"Post-staging library {lib}: PRESENT\\n")
+        elif re.search(r"FAIL missing library: " + re.escape(lib), checks):
+            out.write(f"Post-staging library {lib}: MISSING\\n")
+        else: out.write(f"Post-staging library {lib}: UNVERIFIED\\n")
+    if post and re.search(r"Wine rootfs dependency missing:|Box64 binary missing|Wine executable missing|PRoot_EXECUTION_BLOCKED", post, re.I):
+        out.write("Post-staging runtime dependency/preflight failure: DETECTED\\n")
+    elif smoke_ok: out.write("Post-staging runtime dependency/preflight failure: NOT DETECTED\\n")
+    else: out.write("Post-staging runtime dependency/preflight failure: UNVERIFIED\\n")
+PY
+
 permission_error=0
 if grep -Eqi 'Permission denied|error=13' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat-app.txt" || grep -Eq '(^|[^[:alnum:]_])EACCES([^[:alnum:]_]|$)' "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"; then
   echo "PRoot/permission error signature: DETECTED in app UI or app-process logcat" | tee -a "$report"
@@ -139,11 +198,13 @@ if grep -Eqi 'FATAL EXCEPTION|Process: com\.ras\.mt5runner' "$RUNNER_TEMP/androi
   exit 1
 fi
 
-# Surface the known Wine rootfs library failures and manifest state in a stable summary.
-if grep -Eqi 'libfontconfig\.so\.1|libfreetype\.so\.6|libbrotlidec\.so\.1|Wine rootfs dependency missing' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"; then
-  echo "Wine dependency diagnostic: one or more observed runtime libraries are missing; inspect app logcat/UI." | tee -a "$report"
+# Dependency state is based on post-staging checks above, not the historical startup UI.
+if grep -q '^Post-staging library .*: MISSING$' "$report" || grep -q '^FAIL missing library:' "$RUNNER_TEMP/android-diagnostics/post-staging-runtime-check.txt"; then
+  echo "Wine dependency diagnostic: one or more libraries are missing AFTER private staging." | tee -a "$report"
+elif grep -q '^Post-staging library .*: PRESENT$' "$report"; then
+  echo "Wine dependency diagnostic: known libraries are present after staging; startup warnings were historical/pre-staging." | tee -a "$report"
 else
-  echo "Wine dependency diagnostic: no known missing-library signature observed in captured app UI/logcat (not proof that all dependencies resolve)." | tee -a "$report"
+  echo "Wine dependency diagnostic: post-staging library state remains unverified; inspect post-staging-runtime-check.txt." | tee -a "$report"
 fi
 if grep -Eqi 'manifest status=pending-runtime-build|not verified|pending-runtime-build' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"; then
   echo "Runtime manifest status: pending/unverified; auto-download must refuse this manifest." | tee -a "$report"
