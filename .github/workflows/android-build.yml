@@ -99,7 +99,23 @@ jobs:
           set +o pipefail
           yes | "$sdkmanager_bin" --licenses >/dev/null
           set -o pipefail
-          "$sdkmanager_bin" --install "ndk;28.2.13676358"
+          # SDK downloads can be transiently truncated; clear only the pinned NDK's
+          # partial install/cache and retry before failing the native PRoot build.
+          for attempt in 1 2 3; do
+            echo "Installing pinned Android NDK attempt $attempt/3"
+            if "$sdkmanager_bin" --install "ndk;28.2.13676358"; then
+              test -x "$ANDROID_HOME/ndk/28.2.13676358/ndk-build"
+              test -d "$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt"
+              echo "Pinned Android NDK installed and verified."
+              exit 0
+            fi
+            echo "::warning::NDK install attempt $attempt failed; removing incomplete pinned NDK and retrying."
+            rm -rf "$ANDROID_HOME/ndk/28.2.13676358"
+            find "$ANDROID_HOME/.temp" -maxdepth 1 -type f \\( -iname '*ndk*' -o -iname '*28.2.13676358*' \\) -delete 2>/dev/null || true
+            sleep $((attempt * 5))
+          done
+          echo "::error::Could not install pinned Android NDK after three attempts."
+          exit 1
 
       - name: Build pinned Android-native PRoot
         shell: bash
