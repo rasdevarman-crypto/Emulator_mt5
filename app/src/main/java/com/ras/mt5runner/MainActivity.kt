@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private val runtimeBundleRequest = 5107
     private val exportLogsZipRequest = 5108
     private val preferences by lazy { getSharedPreferences("runner_settings", MODE_PRIVATE) }
+    @Volatile private var safeAutoStartRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,8 +101,123 @@ class MainActivity : Activity() {
         root.addView(ScrollView(this).apply { addView(logsView) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
-        addLog("অ্যাপ চালু হয়েছে; প্রাইভেট runtime staging এবং Android-native PRoot এখনো প্রয়োজন।")
-        refreshRuntimeStatus()
+        addLog("অ্যাপ চালু হয়েছে; নিরাপদ runtime auto-start শুরু হচ্ছে। MT5 স্বয়ংক্রিয়ভাবে চালু হবে শুধু runtime ও PRoot test সফল হলে।")
+        startSafeAutoStart()
+    }
+
+
+    /**
+     * Safe startup: inspect current state, install a verified runtime if needed,
+     * execute-test Android PRoot, and launch MT5 only if it is already installed.
+     * Runtime download/install never launches an installer or MT5 as a side effect.
+     */
+    private fun startSafeAutoStart() {
+        if (safeAutoStartRunning) return
+        safeAutoStartRunning = true
+        launchMt5Button.isEnabled = false
+        setProgress("অ্যাপ startup preflight চলছে…", null)
+        Thread({
+            try {
+                var check = runtimeManager.preflight()
+                runOnUiThread { addLog("Startup preflight: ${check.message}") }
+
+                if (!check.ready) {
+                    var installed: java.io.File? = null
+                    var lastFailure: Exception? = null
+                    for (attempt in 1..3) {
+                        runOnUiThread {
+                            setProgress("Verified runtime install চেষ্টা $attempt/3…", null)
+                            addLog("Runtime auto-install attempt $attempt/3")
+                        }
+                        try {
+                            installed = RuntimeAutoSetup(this).downloadAndInstall { message ->
+                                runOnUiThread {
+                                    addLog("Runtime setup: $message")
+                                    val percent = Regex("(?:Download|ডাউনলোড):\\s*(\\d{1,3})%")
+                                        .find(message)?.groupValues?.get(1)?.toIntOrNull()
+                                    setProgress(message, percent)
+                                }
+                            }
+                            lastFailure = null
+                            break
+                        } catch (e: Exception) {
+                            lastFailure = e
+                            runOnUiThread {
+                                addLog("Runtime auto-install attempt $attempt failed: ${e.message ?: e.javaClass.simpleName}")
+                            }
+                            if (attempt < 3) {
+                                try { Thread.sleep(1000L * attempt) } catch (_: InterruptedException) {
+                                    Thread.currentThread().interrupt()
+                                    throw IllegalStateException("Runtime setup was interrupted")
+                                }
+                            }
+                        }
+                    }
+                    if (lastFailure != null) {
+                        throw IllegalStateException(
+                            "Verified runtime auto-install failed after 3 attempts. " +
+                                (lastFailure.message ?: lastFailure.javaClass.simpleName)
+                        )
+                    }
+                    if (installed != null) {
+                        runOnUiThread { addLog("Verified runtime private staging complete: ${installed.absolutePath}") }
+                    }
+                    runOnUiThread { setProgress("Runtime integrity verified; Android PRoot execution test চলছে…", null) }
+                    check = runtimeManager.preflight()
+                    runOnUiThread { addLog("Post-install PRoot/runtime preflight: ${check.message}") }
+                }
+
+                if (!check.ready) {
+                    val message = check.message
+                    val prootFailure = message.contains("cannot execute", true) ||
+                        message.contains("execution probe failed", true) ||
+                        message.contains("permission denied", true) ||
+                        message.contains("error=13", true) ||
+                        message.contains("EACCES", true)
+                    if (prootFailure) {
+                        throw IllegalStateException(
+                            "PRoot_EXECUTION_BLOCKED: Android cannot execute the native PRoot binary. " +
+                                "No MT5 launch attempted. Diagnostic: $message"
+                        )
+                    }
+                    throw IllegalStateException("Runtime/PRoot preflight failed; MT5 launch blocked: $message")
+                }
+
+                val mt5 = try { runtimeManager.mt5Executable() } catch (_: Exception) { null }
+                if (mt5 == null) {
+                    runOnUiThread {
+                        setProgress("Runtime ও PRoot test সফল; MT5 এখনো ইনস্টল নেই", 100)
+                        addLog("Auto-start stopped safely: MT5 executable not found in Wine prefix; installer selection/launch was not started.")
+                        status.text = "অবস্থা: runtime প্রস্তুত; MT5 ইনস্টল করা নেই"
+                    }
+                } else {
+                    runOnUiThread { setProgress("PRoot test সফল; MT5 চালু হচ্ছে…", null) }
+                    val process = runtimeManager.launchMt5 { line ->
+                        runOnUiThread { addLog("Wine/MT5: $line") }
+                    }
+                    runOnUiThread {
+                        setProgress("MT5 process শুরু হয়েছে", 100)
+                        addLog("Safe auto-start: MT5 process launched (pid=${process.pid()}); GUI compatibility still needs device verification.")
+                        status.text = "অবস্থা: MT5 process চালু হয়েছে"
+                    }
+                }
+            } catch (e: Exception) {
+                val detail = e.message ?: e.javaClass.simpleName
+                runOnUiThread {
+                    val prootBlocked = detail.contains("PRoot_EXECUTION_BLOCKED", true)
+                    setProgress(if (prootBlocked) "PRoot execution blocked — MT5 চালু করা হয়নি" else "Auto-start ব্যর্থ", null)
+                    addLog(if (prootBlocked) "নিরাপত্তার কারণে MT5 launch বন্ধ। $detail" else "নিরাপদ auto-start ব্যর্থ: $detail")
+                    status.text = if (prootBlocked) {
+                        "অবস্থা: Android PRoot execution blocked — লগ পরীক্ষা করুন"
+                    } else {
+                        "অবস্থা: runtime প্রস্তুত নয় — লগ পরীক্ষা করে পুনরায় চেষ্টা করুন"
+                    }
+                }
+            } finally {
+                safeAutoStartRunning = false
+                runOnUiThread { launchMt5Button.isEnabled = true }
+            }
+        }, "safe-runtime-auto-start").start()
     }
 
     /**
