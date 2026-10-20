@@ -74,6 +74,7 @@ jobs:
           bash -n scripts/verify-runtime-provenance.sh
           jq empty runtime/runtime-manifest.example.json
           python3 scripts/test-windows-launch-action.py
+          python3 scripts/test-wine-prefix-initialization.py
 
       - name: Validate Android runtime diagnostic guardrails
         shell: bash
