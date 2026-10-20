@@ -35,11 +35,33 @@ class RuntimeManager(context: Context) {
         } catch (e: Exception) {
             missing += "Bundled Android PRoot could not be installed: ${e.message}"
         }
-        if (!proot.isFile || !proot.canExecute()) missing += "Android-native PRoot executable missing: ${proot.path}"
-        if (!box64.isFile || !box64.canExecute()) missing += "Box64 binary missing: ${box64.path}"
+        if (!proot.isFile || !proot.canExecute()) {
+            missing += "Android-native PRoot executable missing or not executable: ${proot.path}"
+        } else {
+            val probeFile = File(appContext.cacheDir, "proot-preflight.txt")
+            try {
+                val probe = ProcessBuilder(proot.absolutePath, "--version")
+                    .redirectErrorStream(true)
+                    .redirectOutput(probeFile)
+                    .start()
+                if (!probe.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
+                    probe.destroyForcibly()
+                    missing += "Android-native PRoot did not respond to --version within 4 seconds"
+                } else if (probe.exitValue() != 0 || !probeFile.isFile || probeFile.length() == 0L) {
+                    val detail = if (probeFile.isFile) probeFile.readText().take(300) else "no output"
+                    missing += "Android-native PRoot execution probe failed (exit=${probe.exitValue()}): $detail"
+                }
+            } catch (e: Exception) {
+                missing += "Android-native PRoot cannot execute on this device: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                probeFile.delete()
+            }
+        }
+        if (!box64.isFile || !box64.canExecute()) missing += "Box64 binary missing or not executable: ${box64.path}"
         if (!File(hostRoot, "etc/os-release").isFile) missing += "ARM64 host rootfs incomplete"
+        if (!File(hostRoot, "usr/local/bin/box64").canExecute()) missing += "ARM64 host rootfs Box64 executable missing"
         if (!File(wineRoot, "etc/os-release").isFile) missing += "x86_64 Wine rootfs incomplete"
-        if (!wine.isFile || !wine.canExecute()) missing += "Wine executable missing: ${wine.path}"
+        if (!wine.isFile || !wine.canExecute()) missing += "Wine executable missing or not executable: ${wine.path}"
         if (missing.isNotEmpty()) return Preflight(false, missing.joinToString("; "))
         return Preflight(true, "Runtime files found. Android GUI/display compatibility is not validated.")
     }
