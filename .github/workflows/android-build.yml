@@ -73,6 +73,7 @@ jobs:
           bash -n scripts/check-runtime-bundle.sh
           bash -n scripts/verify-runtime-provenance.sh
           jq empty runtime/runtime-manifest.example.json
+          python3 scripts/test-windows-launch-action.py
 
       - name: Validate Android runtime diagnostic guardrails
         shell: bash
