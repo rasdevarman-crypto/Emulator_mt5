@@ -54,7 +54,7 @@ class RuntimeAutoSetup(context: Context) {
             if (archive.exists() && !archive.delete()) throw IllegalStateException("Cannot replace staged runtime archive")
             if (!staging.renameTo(archive)) throw IllegalStateException("Cannot finalize downloaded runtime archive")
             onProgress("Checksum and XZ header verified; installing into app-private staging")
-            return RuntimeBundleInstaller(appContext).install(archive)
+            return RuntimeBundleInstaller(appContext).install(archive, onProgress = onProgress)
         } finally {
             staging.delete()
             archive.delete()
@@ -113,7 +113,7 @@ class RuntimeAutoSetup(context: Context) {
                 "Embedded runtime SHA-256 mismatch (expected $expectedHash, got $actualHash)"
             }
             onProgress("Embedded runtime SHA-256 verified; validating XZ and staging privately")
-            val installed = RuntimeBundleInstaller(appContext).install(archive, expectedHash)
+            val installed = RuntimeBundleInstaller(appContext).install(archive, expectedHash, onProgress)
             marker.parentFile?.mkdirs()
             marker.writeText(expectedHash)
             onProgress("Runtime checksum যাচাই ও private staging সম্পন্ন")
