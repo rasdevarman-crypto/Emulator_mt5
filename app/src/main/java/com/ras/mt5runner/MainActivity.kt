@@ -76,6 +76,10 @@ class MainActivity : Activity() {
             }
         }, params())
         root.addView(Button(this).apply {
+            text = "Wine Prefix তৈরি / যাচাই"
+            setOnClickListener { initializeWinePrefixManually() }
+        }, params())
+        root.addView(Button(this).apply {
             text = "Runtime Download / Install"
             setOnClickListener { downloadVerifiedRuntime() }
         }, params())
@@ -280,6 +284,38 @@ class MainActivity : Activity() {
                 }
             }
         }, "one-tap-windows-launch").start()
+    }
+
+    /** User-triggered only: initialize and verify Wine prefix; never launch MT5. */
+    private fun initializeWinePrefixManually() {
+        launchMt5Button.isEnabled = false
+        addLog("Wine prefix initialization শুরু; MT5 launch করা হবে না।")
+        Thread({
+            try {
+                val process = runtimeManager.initializeWinePrefix { line ->
+                    runOnUiThread { addLog("wineboot: $line") }
+                }
+                val exitCode = process.waitFor()
+                if (exitCode != 0) {
+                    throw IllegalStateException("wineboot --init ব্যর্থ হয়েছে (exit=$exitCode)")
+                }
+                val evidence = runtimeManager.verifyWinePrefix()
+                runOnUiThread {
+                    addLog("Wine prefix initialization সফল (exit=$exitCode)। $evidence")
+                    status.text = "অবস্থা: Wine prefix initialize ও verify হয়েছে"
+                    Toast.makeText(this, "Wine prefix তৈরি ও যাচাই সফল", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    val message = e.message ?: e.javaClass.simpleName
+                    addLog("Wine prefix initialization/verification ব্যর্থ: $message")
+                    status.text = "অবস্থা: Wine prefix যাচাই ব্যর্থ — লগ পরীক্ষা করুন"
+                    Toast.makeText(this, "Wine prefix যাচাই ব্যর্থ", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                runOnUiThread { launchMt5Button.isEnabled = true }
+            }
+        }, "manual-wine-prefix-init").start()
     }
 
     private fun installBundledRuntime() {
