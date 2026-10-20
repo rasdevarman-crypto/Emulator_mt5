@@ -111,7 +111,7 @@ jobs:
             fi
             echo "::warning::NDK install attempt $attempt failed; removing incomplete pinned NDK and retrying."
             rm -rf "$ANDROID_HOME/ndk/28.2.13676358"
-            find "$ANDROID_HOME/.temp" -maxdepth 1 -type f \\( -iname '*ndk*' -o -iname '*28.2.13676358*' \\) -delete 2>/dev/null || true
+            find "$ANDROID_HOME/.temp" -maxdepth 1 -type f \( -iname '*ndk*' -o -iname '*28.2.13676358*' \) -delete 2>/dev/null || true
             sleep $((attempt * 5))
           done
           echo "::error::Could not install pinned Android NDK after three attempts."
