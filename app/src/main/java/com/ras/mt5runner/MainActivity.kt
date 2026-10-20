@@ -55,73 +55,16 @@ class MainActivity : Activity() {
             setTextColor(0xFF374151.toInt())
         }
         root.addView(status, params())
-        root.addView(Button(this).apply {
-            text = "MT5 ইনস্টলার নির্বাচন করুন"
-            setOnClickListener { chooseInstaller() }
-        }, params())
-        root.addView(Button(this).apply {
-            text = "All-in-one APK থেকে runtime ইনস্টল"
-            setOnClickListener { installBundledRuntime() }
-        }, params())
-        root.addView(Button(this).apply {
-            text = "Verified runtime স্বয়ংক্রিয় ডাউনলোড"
-            setOnClickListener { downloadVerifiedRuntime() }
-        }, params())
-        root.addView(Button(this).apply {
-            text = "Runtime archive ম্যানুয়ালি নির্বাচন"
-            setOnClickListener { chooseRuntimeBundle() }
-        }, params())
-        root.addView(Button(this).apply {
-            text = "অফিসিয়াল MT5 ডাউনলোড পেজ খুলুন"
-            setOnClickListener {
-                try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.metatrader5.com/en/download")))
-                    addLog("অফিসিয়াল MT5 ডাউনলোড পেজ খোলা হয়েছে")
-                } catch (e: Exception) { addLog("ডাউনলোড পেজ খোলা যায়নি: ${e.message}") }
-            }
-        }, params())
-        root.addView(Button(this).apply {
-            text = "রানটাইম পরীক্ষা করুন"
-            setOnClickListener { refreshRuntimeStatus() }
-        }, params())
         launchMt5Button = Button(this).apply {
-            text = "MT5 চালু করুন"
-            isEnabled = false
-            setOnClickListener {
-                try {
-                    val process = runtimeManager.launchMt5 { line -> runOnUiThread { addLog("Wine: $line") } }
-                    addLog("MT5 process শুরু হয়েছে; GUI/ডিভাইস সামঞ্জস্য এখনো যাচাই হয়নি")
-                } catch (e: Exception) {
-                    addLog("MT5 চালু করা যায়নি: ${e.message}")
-                    refreshRuntimeStatus()
-                }
-            }
+            text = "Windows চালু করুন"
+            isEnabled = true
+            setOnClickListener { launchWindowsOneTap() }
         }
         root.addView(launchMt5Button, params())
 
         root.addView(TextView(this).apply {
-            text = "সেটিংস"; textSize = 18f
-            setPadding(0, 16, 0, 4); setTextColor(0xFF111827.toInt())
-        }, params())
-        keepScreenOn = CheckBox(this).apply {
-            text = "অ্যাপ খোলা থাকলে স্ক্রিন জাগ্রত রাখুন"
-            isChecked = preferences.getBoolean("keep_screen_on", false)
-            setOnCheckedChangeListener { _, checked ->
-                preferences.edit().putBoolean("keep_screen_on", checked).apply()
-                applyKeepScreenOn(checked)
-                addLog(if (checked) "স্ক্রিন জাগ্রত রাখার সেটিং চালু" else "স্ক্রিন জাগ্রত রাখার সেটিং বন্ধ")
-            }
-        }
-        root.addView(keepScreenOn, params())
-        applyKeepScreenOn(keepScreenOn.isChecked)
-
-        root.addView(TextView(this).apply {
             text = "ডায়াগনস্টিক লগ"; textSize = 18f
             setPadding(0, 16, 0, 8); setTextColor(0xFF111827.toInt())
-        }, params())
-        root.addView(Button(this).apply {
-            text = "লগ ফাইল এক্সপোর্ট করুন"
-            setOnClickListener { exportLogs() }
         }, params())
         logsView = TextView(this).apply { textSize = 12f; setTextColor(0xFF374151.toInt()) }
         root.addView(ScrollView(this).apply { addView(logsView) },
@@ -129,6 +72,62 @@ class MainActivity : Activity() {
         setContentView(root)
         addLog("অ্যাপ চালু হয়েছে; প্রাইভেট runtime staging এবং Android-native PRoot এখনো প্রয়োজন।")
         refreshRuntimeStatus()
+    }
+
+    /**
+     * Single-button flow: install the embedded verified runtime if absent; once ready,
+     * open the installer picker if MT5 is not installed; otherwise launch MT5.
+     */
+    private fun launchWindowsOneTap() {
+        launchMt5Button.isEnabled = false
+        Thread({
+            try {
+                val check = runtimeManager.preflight()
+                if (!check.ready) {
+                    runOnUiThread { addLog("Windows চালুর আগে runtime প্রস্তুত করা হচ্ছে…") }
+                    val installed = RuntimeBundleInstaller(this).let {
+                        val available = assets.list("runtime")?.contains("runtime-bundle.tar.xz") == true
+                        if (!available) throw IllegalStateException(
+                            "এই APK-তে verified runtime bundle নেই। runtime_run_id সহ All-in-one APK পুনরায় build করতে হবে।"
+                        )
+                        val archive = java.io.File(cacheDir, "runtime-bundle.tar.xz")
+                        val expectedSha256 = assets.open("runtime/runtime-bundle.tar.xz.sha256")
+                            .bufferedReader(Charsets.UTF_8).use { it.readText().trim().split(Regex("\\s+")).first() }
+                        assets.open("runtime/runtime-bundle.tar.xz").use { input ->
+                            archive.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        try { it.install(archive, expectedSha256) } finally { archive.delete() }
+                    }
+                    runOnUiThread {
+                        addLog("Runtime checksum যাচাই ও private staging সম্পন্ন: ${installed.absolutePath}")
+                        refreshRuntimeStatus()
+                        addLog("এখন আবার ‘Windows চালু করুন’ চাপুন; MT5 ইনস্টল না থাকলে installer নির্বাচন খুলবে।")
+                    }
+                    return@Thread
+                }
+
+                val mt5 = try { runtimeManager.mt5Executable() } catch (_: Exception) { null }
+                if (mt5 == null) {
+                    runOnUiThread {
+                        addLog("Runtime প্রস্তুত। Windows/MT5 প্রথমবার ইনস্টল করতে MT5 installer (.exe) নির্বাচন করুন।")
+                        launchMt5Button.isEnabled = true
+                        chooseInstaller()
+                    }
+                } else {
+                    val process = runtimeManager.launchMt5 { line -> runOnUiThread { addLog("Wine: $line") } }
+                    runOnUiThread {
+                        addLog("MT5 process শুরু হয়েছে; GUI/display compatibility বাস্তব ডিভাইসে যাচাই বাকি।")
+                        launchMt5Button.isEnabled = true
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    addLog("Windows চালু করা যায়নি: ${e.message ?: e.javaClass.simpleName}")
+                    refreshRuntimeStatus()
+                    launchMt5Button.isEnabled = true
+                }
+            }
+        }, "one-tap-windows-launch").start()
     }
 
     private fun installBundledRuntime() {
@@ -260,12 +259,12 @@ class MainActivity : Activity() {
     private fun refreshRuntimeStatus() {
         val check = runtimeManager.preflight()
         status.text = if (check.ready) {
-            "অবস্থা: runtime ফাইল পাওয়া গেছে; Android GUI/MT5 যাচাই বাকি"
+            if (mt5Exists) "অবস্থা: Windows/MT5 চালুর জন্য প্রস্তুত" else "অবস্থা: runtime প্রস্তুত; প্রথমবার Windows ইনস্টল করতে Launch চাপুন"
         } else {
-            "অবস্থা: runtime প্রস্তুত নয় — ${check.message}"
+            "অবস্থা: runtime প্রস্তুত নয় — Launch চাপলে স্বয়ংক্রিয়ভাবে runtime ইনস্টল হবে: ${check.message}"
         }
         val mt5Exists = try { runtimeManager.mt5Executable().isFile } catch (_: Exception) { false }
-        launchMt5Button.isEnabled = check.ready && mt5Exists
+        launchMt5Button.isEnabled = true
         if (!check.ready) addLog("Runtime preflight: ${check.message}")
         else if (!mt5Exists) addLog("Runtime preflight: MT5 terminal.exe এখনো Wine prefix-এ পাওয়া যায়নি")
     }
