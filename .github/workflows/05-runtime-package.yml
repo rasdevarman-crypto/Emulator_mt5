@@ -1,10 +1,16 @@
 name: 05 Package Runtime Bundle
 on:
+  # Also run when this packaging workflow itself is repaired on main. In that
+  # case, select the latest successful rootfs run automatically.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/05-runtime-package.yml"
   workflow_dispatch:
     inputs:
       upstream_run_id:
-        description: Successful ARM64 rootfs build run ID
-        required: true
+        description: Successful ARM64 rootfs build run ID (auto-select latest on blank)
+        required: false
         type: string
 permissions:
   contents: read
@@ -25,27 +31,42 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Resolve upstream rootfs run
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.upstream_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_id="$REQUESTED_RUN_ID"
+          if [[ -z "$run_id" ]]; then
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow 04-arm64-rootfs.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          fi
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "No successful ARM64 rootfs run ID found: '$run_id'" >&2; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Using successful ARM64 rootfs run: $run_id"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: box64-arm64-build-output
           path: build/box64-output
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: wine-11.0-wow64-x86_64-build-output
           path: build/wine-output
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: pinned-runtime-sources
           path: build/runtime-sources
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: arm64-host-rootfs
           path: build/arm64-rootfs
