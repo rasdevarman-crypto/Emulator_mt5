@@ -10,7 +10,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: split-runtime-${{ github.workflow }}-${{ github.ref }}
+  group: runtime-build-v2-${{ github.ref }}
   cancel-in-progress: true
 env:
   BOX64_COMMIT: "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
