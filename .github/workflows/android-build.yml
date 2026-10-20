@@ -7,7 +7,7 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_run:
-    workflows: ["Experimental Wine WoW64 + Box64 Build"]
+    workflows: ["06 ARM64 Runtime Smoke Test"]
     types: [completed]
 
 permissions:
