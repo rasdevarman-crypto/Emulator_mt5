@@ -18,6 +18,12 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
+    // The runtime bundle is already XZ-compressed (600+ MB). Recompressing it
+    // as an APK asset exhausts Gradle's 2 GiB heap; store .xz assets unchanged.
+    androidResources {
+        noCompress += "xz"
+    }
+
     // CI-generated release APKs are installable test builds, signed with the
     // standard debug key. Production distribution must use a private release key.
     buildTypes {
