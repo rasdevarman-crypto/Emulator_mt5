@@ -52,7 +52,7 @@ class RuntimeManager(context: Context) {
                     missing += "Android-native PRoot execution probe failed (exit=${probe.exitValue()}): $detail"
                 }
             } catch (e: Exception) {
-                missing += "Android-native PRoot cannot execute on this device: ${e.message ?: e.javaClass.simpleName}"
+                missing += "Android-native PRoot cannot execute on this device: ${e.message ?: e.javaClass.simpleName}; path=${proot.absolutePath}; exists=${proot.isFile}; readable=${proot.canRead()}; executable=${proot.canExecute()}; appFilesDir=${appContext.filesDir.absolutePath}"
             } finally {
                 probeFile.delete()
             }
@@ -154,10 +154,17 @@ class RuntimeManager(context: Context) {
         if (entries.isEmpty()) throw IllegalStateException("APK has no bundled PRoot files")
         if (destination.exists()) destination.deleteRecursively()
         copyAssetTree("runtime/proot", destination)
-        if (!proot.setExecutable(true, false) && !proot.canExecute()) {
-            throw IllegalStateException("Could not mark bundled PRoot executable")
+        try {
+            // Asset extraction does not preserve Unix mode bits. Restore executable mode
+            // explicitly before attempting ProcessBuilder.exec on Android.
+            android.system.Os.chmod(proot.absolutePath, 0b111101101) // 0755
+        } catch (e: Exception) {
+            throw IllegalStateException("PRoot chmod 0755 failed at ${proot.absolutePath}: ${e.message}", e)
         }
-        marker.writeText("source=APK asset; Android arm64 PRoot candidate")
+        if (!proot.setExecutable(true, false) || !proot.canExecute()) {
+            throw IllegalStateException("Could not mark bundled PRoot executable: path=${proot.absolutePath}, readable=${proot.canRead()}, executable=${proot.canExecute()}")
+        }
+        marker.writeText("source=APK asset; chmod=0755; Android arm64 PRoot candidate")
     }
 
     private fun copyAssetTree(assetPath: String, destination: File) {
