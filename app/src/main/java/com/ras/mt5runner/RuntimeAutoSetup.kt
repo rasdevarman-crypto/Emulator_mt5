@@ -7,27 +7,28 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.UnknownHostException
 import java.security.MessageDigest
+import java.util.Base64
 
 /**
  * Downloads a version-pinned runtime manifest and archive, verifies SHA-256 before extraction,
  * and delegates path-safe installation to RuntimeBundleInstaller.
- *
- * The manifest must be hosted over HTTPS and contain:
- * status=verified, schema_version=1, archive_url, archive_sha256, archive_size_bytes.
- * This intentionally refuses the example manifest or an unverified runtime candidate.
+ * A pending/example manifest is intentionally refused.
  */
 class RuntimeAutoSetup(context: Context) {
     private val appContext = context.applicationContext
     private val manifestUrl =
         "https://raw.githubusercontent.com/rasdevarman-crypto/Emulator_mt5/main/runtime/runtime-manifest.json"
+    private val manifestApiUrl =
+        "https://api.github.com/repos/rasdevarman-crypto/Emulator_mt5/contents/runtime/runtime-manifest.json?ref=main"
     private val maxArchiveBytes = 3L * 1024L * 1024L * 1024L
 
     fun downloadAndInstall(onProgress: (String) -> Unit): File {
-        val manifest = downloadManifest()
+        val manifest = downloadManifest(onProgress)
         require(manifest.optInt("schema_version", -1) == 1) { "Unsupported runtime manifest schema" }
         require(manifest.optString("status") == "verified") {
-            "Published runtime manifest is not marked verified; automatic setup is disabled"
+            "Runtime manifest status is '${manifest.optString("status", "missing")}', not verified. Automatic setup is disabled until a successful bundle checksum and ARM64 smoke test are published."
         }
         val archiveUrl = manifest.optString("archive_url")
         require(archiveUrl.startsWith("https://")) { "Runtime archive URL must use HTTPS" }
@@ -46,9 +47,10 @@ class RuntimeAutoSetup(context: Context) {
                 "Runtime SHA-256 mismatch (expected $expectedHash, got $actualHash)"
             }
             require(staging.length() == expectedSize) { "Runtime archive size does not match manifest" }
+            verifyXzHeader(staging)
             if (archive.exists() && !archive.delete()) throw IllegalStateException("Cannot replace staged runtime archive")
             if (!staging.renameTo(archive)) throw IllegalStateException("Cannot finalize downloaded runtime archive")
-            onProgress("Checksum verified; installing runtime into private storage")
+            onProgress("Checksum and XZ header verified; installing into app-private staging")
             return RuntimeBundleInstaller(appContext).install(archive)
         } finally {
             staging.delete()
@@ -56,23 +58,62 @@ class RuntimeAutoSetup(context: Context) {
         }
     }
 
-    private fun downloadManifest(): JSONObject {
-        val connection = (URL(manifestUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 20_000
-            instanceFollowRedirects = false
-            requestMethod = "GET"
-        }
+    private fun downloadManifest(onProgress: (String) -> Unit): JSONObject {
+        val failures = mutableListOf<String>()
         try {
-            require(connection.responseCode == HttpURLConnection.HTTP_OK) {
-                "Runtime manifest unavailable (HTTP ${connection.responseCode}); verified bundle may not be published yet"
-            }
-            require(connection.contentLengthLong in -1L..1_048_576L) { "Runtime manifest is too large" }
-            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            return JSONObject(body)
-        } finally {
-            connection.disconnect()
+            val raw = fetchText(manifestUrl, null)
+            onProgress("Runtime manifest downloaded from raw.githubusercontent.com")
+            return JSONObject(raw)
+        } catch (e: Exception) {
+            failures += "raw.githubusercontent.com: ${shortError(e)}"
+            onProgress("Primary manifest host failed; trying GitHub API fallback")
         }
+
+        try {
+            val apiJson = JSONObject(fetchText(manifestApiUrl, "application/vnd.github+json"))
+            require(apiJson.optString("encoding") == "base64") { "GitHub API manifest response was not base64 encoded" }
+            val encoded = apiJson.optString("content").replace("\\s".toRegex(), "")
+            val decoded = Base64.getDecoder().decode(encoded)
+            onProgress("Runtime manifest downloaded through GitHub API fallback")
+            return JSONObject(String(decoded, Charsets.UTF_8))
+        } catch (e: Exception) {
+            failures += "api.github.com: ${shortError(e)}"
+        }
+        val dns = failures.any { it.contains("UnknownHostException") || it.contains("resolve") || it.contains("hostname", true) }
+        val advice = if (dns) {
+            " Check internet access, VPN/proxy and Android Settings > Network > Private DNS; then retry on another network."
+        } else ""
+        throw IllegalStateException("Could not fetch runtime manifest. ${failures.joinToString(" | ")}.$advice")
+    }
+
+    private fun fetchText(url: String, accept: String?): String {
+        var last: Exception? = null
+        for (attempt in 1..2) {
+            try {
+                val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15_000
+                    readTimeout = 20_000
+                    instanceFollowRedirects = true
+                    requestMethod = "GET"
+                    if (accept != null) setRequestProperty("Accept", accept)
+                    setRequestProperty("User-Agent", "MT5-RAS-Runner-Android")
+                }
+                try {
+                    val code = connection.responseCode
+                    require(code == HttpURLConnection.HTTP_OK) {
+                        "HTTP $code from ${URL(url).host}"
+                    }
+                    require(connection.contentLengthLong in -1L..1_048_576L) { "Runtime manifest is too large" }
+                    return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (e: Exception) {
+                last = e
+                if (attempt < 2) Thread.sleep(500L * attempt)
+            }
+        }
+        throw last ?: IllegalStateException("Manifest request failed")
     }
 
     private fun downloadToFile(url: String, destination: File, expectedSize: Long, onProgress: (String) -> Unit) {
@@ -81,10 +122,13 @@ class RuntimeAutoSetup(context: Context) {
             readTimeout = 60_000
             instanceFollowRedirects = true
             requestMethod = "GET"
+            setRequestProperty("User-Agent", "MT5-RAS-Runner-Android")
         }
         try {
-            require(connection.responseCode == HttpURLConnection.HTTP_OK) {
-                "Runtime download failed (HTTP ${connection.responseCode})"
+            val code = connection.responseCode
+            require(code == HttpURLConnection.HTTP_OK) {
+                val host = runCatching { URL(url).host }.getOrDefault("runtime host")
+                "Runtime download failed (HTTP $code from $host)"
             }
             val declared = connection.contentLengthLong
             require(declared == -1L || declared == expectedSize) { "Server archive size differs from manifest" }
@@ -109,6 +153,21 @@ class RuntimeAutoSetup(context: Context) {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun verifyXzHeader(file: File) {
+        val expected = byteArrayOf(0xFD.toByte(), 0x37, 0x7A, 0x58, 0x5A, 0x00)
+        val actual = ByteArray(expected.size)
+        file.inputStream().use { input ->
+            require(input.read(actual) == actual.size && actual.contentEquals(expected)) {
+                "Downloaded payload is not an XZ archive. The URL may return an HTML error page or an artifact ZIP."
+            }
+        }
+    }
+
+    private fun shortError(error: Exception): String = when (error) {
+        is UnknownHostException -> "DNS lookup failed (UnknownHostException: ${error.message})"
+        else -> "${error.javaClass.simpleName}: ${error.message ?: "no details"}"
     }
 
     private fun sha256(file: File): String {
