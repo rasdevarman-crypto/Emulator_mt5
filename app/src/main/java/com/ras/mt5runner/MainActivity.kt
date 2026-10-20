@@ -10,6 +10,9 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
+import android.widget.ProgressBar
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -20,6 +23,8 @@ import java.util.Locale
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var logsView: TextView
+    private lateinit var progressView: TextView
+    private lateinit var progressBar: ProgressBar
     private lateinit var keepScreenOn: CheckBox
     private lateinit var launchMt5Button: Button
     private lateinit var runtimeManager: RuntimeManager
@@ -61,6 +66,30 @@ class MainActivity : Activity() {
             setOnClickListener { launchWindowsOneTap() }
         }
         root.addView(launchMt5Button, params())
+        root.addView(Button(this).apply {
+            text = "Runtime Download / Install"
+            setOnClickListener { downloadVerifiedRuntime() }
+        }, params())
+        root.addView(Button(this).apply {
+            text = "Log ফাইল Download (TXT)"
+            setOnClickListener { exportLogs() }
+        }, params())
+        root.addView(Button(this).apply {
+            text = "সব Log Download (ZIP)"
+            setOnClickListener { exportLogsZip() }
+        }, params())
+        progressView = TextView(this).apply {
+            text = "ডাউনলোড/ইনস্টলেশন: এখনো শুরু হয়নি"
+            textSize = 13f
+            setPadding(0, 8, 0, 4)
+            setTextColor(0xFF374151.toInt())
+        }
+        root.addView(progressView, params())
+        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+        }
+        root.addView(progressBar, params())
 
         root.addView(TextView(this).apply {
             text = "ডায়াগনস্টিক লগ"; textSize = 18f
@@ -158,20 +187,47 @@ class MainActivity : Activity() {
 
     private fun downloadVerifiedRuntime() {
         launchMt5Button.isEnabled = false
+        setProgress("Runtime manifest যাচাই হচ্ছে…", 0)
         addLog("Verified runtime manifest পরীক্ষা ও download শুরু")
         Thread({
             try {
                 val installed = RuntimeAutoSetup(this).downloadAndInstall { message ->
-                    runOnUiThread { addLog("Runtime setup: $message") }
+                    runOnUiThread {
+                        addLog("Runtime setup: $message")
+                        val percent = Regex("(?:Download|ডাউনলোড):\\s*(\\d{1,3})%").find(message)?.groupValues?.get(1)?.toIntOrNull()
+                        setProgress(message, percent)
+                    }
                 }
                 runOnUiThread {
+                    setProgress("Runtime install সম্পন্ন", 100)
                     addLog("Runtime install সম্পন্ন: ${installed.absolutePath}")
                     refreshRuntimeStatus()
                 }
             } catch (e: Exception) {
-                runOnUiThread { addLog("Automatic runtime setup ব্যর্থ: ${e.message ?: e.javaClass.simpleName}") }
+                runOnUiThread {
+                    setProgress("ব্যর্থ: ${e.message ?: e.javaClass.simpleName}", null)
+                    addLog("Automatic runtime setup ব্যর্থ: ${e.message ?: e.javaClass.simpleName}")
+                }
+            } finally {
+                runOnUiThread { launchMt5Button.isEnabled = true }
             }
         }, "runtime-auto-setup").start()
+    }
+
+    private fun setProgress(message: String, percent: Int?) {
+        if (!::progressView.isInitialized) return
+        progressView.text = "ডাউনলোড/ইনস্টলেশন: $message"
+        progressBar.isIndeterminate = percent == null
+        if (percent != null) progressBar.progress = percent.coerceIn(0, 100)
+    }
+
+    private fun exportLogsZip() {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/zip"
+            putExtra(Intent.EXTRA_TITLE, "mt5-ras-runner-logs.zip")
+        }
+        startActivityForResult(intent, exportLogsRequest + 1)
     }
 
     private fun chooseRuntimeBundle() {
@@ -247,9 +303,24 @@ class MainActivity : Activity() {
                         it.write(logs.joinToString("\n"))
                         it.write("\n")
                     } ?: throw IllegalStateException("ফাইল লেখা যায়নি")
-                    addLog("ডায়াগনস্টিক লগ এক্সপোর্ট করা হয়েছে")
+                    addLog("ডায়াগনস্টিক লগ TXT এক্সপোর্ট করা হয়েছে")
                 } catch (e: Exception) {
                     addLog("লগ এক্সপোর্ট ব্যর্থ: ${e.message}")
+                }
+            }
+            exportLogsRequest + 1 -> {
+                try {
+                    val snapshot = logs.joinToString("\n", postfix = "\n")
+                    val output = contentResolver.openOutputStream(uri)
+                        ?: throw IllegalStateException("ZIP ফাইল লেখা যায়নি")
+                    ZipOutputStream(output).use { zip ->
+                        zip.putNextEntry(ZipEntry("diagnostics.log"))
+                        zip.write(snapshot.toByteArray(Charsets.UTF_8))
+                        zip.closeEntry()
+                    }
+                    addLog("ডায়াগনস্টিক লগ ZIP এক্সপোর্ট করা হয়েছে")
+                } catch (e: Exception) {
+                    addLog("ZIP লগ এক্সপোর্ট ব্যর্থ: ${e.message}")
                 }
             }
         }
