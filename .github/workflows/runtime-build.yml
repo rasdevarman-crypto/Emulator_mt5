@@ -151,7 +151,9 @@ jobs:
   package-rootfs-bundle:
     name: Assemble Ubuntu rootfs and candidate bundle
     needs: [build-box64, build-wine, build-arm64-host-rootfs]
-    runs-on: ubuntu-24.04
+    # Set repository variable RUNTIME_PACKAGE_RUNNER to the configured larger-runner
+    # label (for example, ubuntu-24.04-16core). Falls back to the standard runner.
+    runs-on: ${{ vars.RUNTIME_PACKAGE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -171,6 +173,21 @@ jobs:
         with:
           name: arm64-host-rootfs
           path: build/arm64-rootfs
+      - name: Free unused runner disk space and report capacity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "=== Disk space before cleanup ==="
+          df -h "$GITHUB_WORKSPACE" /tmp
+          df -i "$GITHUB_WORKSPACE" /tmp
+          # This packaging-only job does not need these preinstalled SDK/tool caches.
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet \
+            /usr/local/share/boost /usr/share/swift
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          echo "=== Disk space after cleanup ==="
+          df -h "$GITHUB_WORKSPACE" /tmp
+          df -i "$GITHUB_WORKSPACE" /tmp
       - name: Install rootfs tools
         run: sudo apt-get update && sudo apt-get install -y debootstrap proot file binutils jq xz-utils
       - name: Build Ubuntu 24.04 x86_64 rootfs and stage candidate bundle
@@ -292,15 +309,31 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
           du -sh bundle bundle/rootfs bundle/rootfs-arm64 | tee provenance/package-rootfs-size-before-archive.txt
           df -h "$PWD" | tee provenance/package-disk-space-before-archive.txt
-          # Use single-threaded low-memory compression: the runner has a finite disk
-          # and memory budget, and xz -T0 may over-allocate threads while tar streams.
+          # Capture capacity immediately before compression; keep xz at one thread.
           df -h "$PWD" | tee provenance/package-disk-space-before-compress.txt
+          df -i "$PWD" | tee provenance/package-inodes-before-compress.txt
           free -h | tee provenance/package-memory-before-compress.txt
-          rm -f runtime-bundle-candidate.tar.xz runtime-bundle-candidate.tar.xz.sha256
-          set -o pipefail
-          sudo tar --numeric-owner -cf - bundle provenance | xz -T1 -0 > runtime-bundle-candidate.tar.xz
-          test -s runtime-bundle-candidate.tar.xz
-          xz -t runtime-bundle-candidate.tar.xz
+          rm -f runtime-bundle-candidate.tar.xz runtime-bundle-candidate.tar.xz.partial runtime-bundle-candidate.tar.xz.sha256
+          set +e
+          sudo tar --numeric-owner -cf - bundle provenance 2>provenance/tar.stderr \
+            | xz -T1 -0 > runtime-bundle-candidate.tar.xz.partial 2>provenance/xz.stderr
+          pipeline_status=("${PIPESTATUS[@]}")
+          tar_status="${pipeline_status[0]}"
+          xz_status="${pipeline_status[1]}"
+          set -e
+          echo "tar exit code: $tar_status"
+          echo "xz exit code: $xz_status"
+          cat provenance/tar.stderr
+          cat provenance/xz.stderr
+          if (( tar_status != 0 || xz_status != 0 )); then
+            df -h "$PWD" | tee provenance/package-disk-space-after-failure.txt
+            df -i "$PWD" | tee provenance/package-inodes-after-failure.txt
+            rm -f runtime-bundle-candidate.tar.xz.partial
+            exit 1
+          fi
+          test -s runtime-bundle-candidate.tar.xz.partial
+          xz -t runtime-bundle-candidate.tar.xz.partial
+          mv runtime-bundle-candidate.tar.xz.partial runtime-bundle-candidate.tar.xz
           sha256sum runtime-bundle-candidate.tar.xz > runtime-bundle-candidate.tar.xz.sha256
           df -h "$PWD" | tee provenance/package-disk-space-after-compress.txt
       - name: Upload candidate bundle and provenance
