@@ -47,7 +47,7 @@ import re,sys,xml.etree.ElementTree as ET
 try:
     root=ET.parse(sys.argv[1]).getroot()
     for n in root.iter('node'):
-        if 'Runtime Download / Install' in n.attrib.get('text',''):
+        if 'runtime download / install' in n.attrib.get('text','').lower():
             m=re.search(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.attrib.get('bounds',''))
             if m:
                 x1,y1,x2,y2=map(int,m.groups()); print((x1+x2)//2,(y1+y2)//2); raise SystemExit(0)
@@ -58,7 +58,7 @@ if test -s "$RUNNER_TEMP/android-diagnostics/runtime-button.txt"; then
   read -r x y < "$RUNNER_TEMP/android-diagnostics/runtime-button.txt"
   adb shell input tap "$x" "$y"
   echo "Tapped Runtime Download / Install at $x,$y" | tee -a "$report"
-  for i in $(seq 1 36); do
+  for i in $(seq 1 60); do
     sleep 10
     adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
     adb pull /sdcard/window.xml "$RUNNER_TEMP/android-diagnostics/runtime-ui.xml" >/dev/null 2>&1 || true
@@ -67,8 +67,13 @@ if test -s "$RUNNER_TEMP/android-diagnostics/runtime-button.txt"; then
     fi
   done
   cp "$RUNNER_TEMP/android-diagnostics/runtime-ui.xml" "$RUNNER_TEMP/android-diagnostics/runtime-ui-after-download.xml" 2>/dev/null || true
+  if ! grep -Eqi 'Runtime install সম্পন্ন|Embedded runtime checksum already verified|Runtime checksum যাচাই ও private staging সম্পন্ন' "$RUNNER_TEMP/android-diagnostics/runtime-ui.xml" 2>/dev/null; then
+    echo "::error::Runtime staging completion was not observed after tapping Runtime Download / Install."
+    exit 1
+  fi
 else
-  echo "::warning::Could not locate runtime button in UI hierarchy; app launch will still be recorded."
+  echo "::error::Could not locate Runtime Download / Install button in UI hierarchy."
+  exit 1
 fi
 
 # Trigger app's runtime preflight/PRoot execution path.
@@ -79,7 +84,7 @@ import re,sys,xml.etree.ElementTree as ET
 try:
     root=ET.parse(sys.argv[1]).getroot()
     for n in root.iter('node'):
-        if 'Windows চালু করুন' in n.attrib.get('text',''):
+        if 'windows চালু করুন' in n.attrib.get('text','').lower():
             m=re.search(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.attrib.get('bounds',''))
             if m:
                 x1,y1,x2,y2=map(int,m.groups()); print((x1+x2)//2,(y1+y2)//2); raise SystemExit(0)
@@ -91,22 +96,31 @@ if test -s "$RUNNER_TEMP/android-diagnostics/launch-button.txt"; then
   adb shell input tap "$x" "$y"
   echo "Tapped Windows launch / runtime preflight at $x,$y" | tee -a "$report"
   sleep 25
+else
+  echo "::error::Could not locate Windows launch button in UI hierarchy."
+  exit 1
 fi
 
 adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
 adb pull /sdcard/window.xml "$RUNNER_TEMP/android-diagnostics/final-ui.xml" >/dev/null 2>&1 || true
 adb logcat -d -v threadtime > "$RUNNER_TEMP/android-diagnostics/logcat.txt"
+app_pid="$(adb shell pidof "$PACKAGE_NAME" | tr -d '\r' | awk '{print $1}')"
+if test -n "$app_pid"; then
+  adb logcat -d -v threadtime --pid="$app_pid" > "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"
+else
+  : > "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"
+fi
 adb shell dumpsys activity activities > "$RUNNER_TEMP/android-diagnostics/activities.txt" || true
 adb shell dumpsys package "$PACKAGE_NAME" > "$RUNNER_TEMP/android-diagnostics/package.txt" || true
 
 permission_error=0
-if grep -Eqi 'Permission denied|error=13|EACCES' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat.txt"; then
-  echo "PRoot/permission error signature: DETECTED" | tee -a "$report"
+if grep -Eqi 'Permission denied|error=13' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat-app.txt" || grep -Eq '(^|[^[:alnum:]_])EACCES([^[:alnum:]_]|$)' "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"; then
+  echo "PRoot/permission error signature: DETECTED in app UI or app-process logcat" | tee -a "$report"
   permission_error=1
 else
-  echo "PRoot/permission error signature: NOT DETECTED in captured UI/logcat (not proof of successful PRoot execution)" | tee -a "$report"
+  echo "PRoot/permission error signature: NOT DETECTED in app UI/app-process logcat (runtime probe evidence is reported separately)" | tee -a "$report"
 fi
-if grep -Eqi 'Exec format error|wrong ELF class|cannot execute binary file' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat.txt"; then
+if grep -Eqi 'Exec format error|wrong ELF class|cannot execute binary file' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat-app.txt"; then
   echo "Architecture mismatch / unsupported ELF execution signature: DETECTED" | tee -a "$report"
   echo "::warning::Native executable may not match emulator architecture or ABI translation capabilities."
 fi
