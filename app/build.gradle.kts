@@ -24,6 +24,14 @@ android {
         noCompress += "xz"
     }
 
+    // Keep executable ELF payloads intact and extract them to nativeLibraryDir.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libproot*.so"
+        }
+    }
+
     // CI-generated release APKs are installable test builds, signed with the
     // standard debug key. Production distribution must use a private release key.
     buildTypes {
