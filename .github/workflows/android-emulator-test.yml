@@ -204,10 +204,16 @@ jobs:
             adb shell dumpsys activity activities > "$RUNNER_TEMP/android-diagnostics/activities.txt" || true
             adb shell dumpsys package "$PACKAGE_NAME" > "$RUNNER_TEMP/android-diagnostics/package.txt" || true
 
+            permission_error=0
             if grep -Eqi 'Permission denied|error=13|EACCES' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat.txt"; then
               echo "PRoot/permission error signature: DETECTED" | tee -a "$report"
+              permission_error=1
             else
               echo "PRoot/permission error signature: NOT DETECTED in captured UI/logcat (not proof of successful PRoot execution)" | tee -a "$report"
+            fi
+            if grep -Eqi 'Exec format error|wrong ELF class|cannot execute binary file' "$RUNNER_TEMP/android-diagnostics/"*.xml "$RUNNER_TEMP/android-diagnostics/logcat.txt"; then
+              echo "Architecture mismatch / unsupported ELF execution signature: DETECTED" | tee -a "$report"
+              echo "::warning::Native executable may not match emulator architecture or ABI translation capabilities."
             fi
             if grep -Eqi 'FATAL EXCEPTION|Process: com\.ras\.mt5runner' "$RUNNER_TEMP/android-diagnostics/logcat.txt"; then
               echo "Application crash: DETECTED" | tee -a "$report"
@@ -215,10 +221,14 @@ jobs:
               exit 1
             fi
             if grep -qi 'AArch64' "$RUNNER_TEMP/proot-elf.txt" 2>/dev/null && ! grep -qi 'arm64-v8a' <<< "$(adb shell getprop ro.product.cpu.abilist)"; then
-              echo "Architecture mismatch: ARM64 PRoot but emulator ABI list lacks arm64-v8a." | tee -a "$report"
-              echo "::warning::Architecture mismatch: APK PRoot is AArch64 but Android Emulator does not advertise arm64-v8a."
+              echo "ABI note: PRoot ELF is AArch64, while emulator ABI list omits arm64-v8a; this is not by itself proof of failure because API/system-image translation may exist. Actual PRoot execution evidence is required." | tee -a "$report"
+              echo "::warning::ARM64 PRoot execution depends on the API 35 x86_64 image's translation support; see actual preflight output and logs."
             fi
             echo "Android install/launch and diagnostics collection completed." | tee -a "$report"
+            if [[ "$permission_error" -eq 1 ]]; then
+              echo "::error::PRoot permission error signature detected in app UI/logcat."
+              exit 1
+            fi
 
       - name: Collect diagnostics even after emulator/test failure
         if: ${{ always() }}
