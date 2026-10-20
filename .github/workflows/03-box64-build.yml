@@ -1,0 +1,85 @@
+name: 03 Build Box64 ARM64
+on:
+  workflow_run:
+    workflows: ["02 Build Wine 11.0"]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: split-runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  BOX64_COMMIT: "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a"
+  WINE_VERSION: "11.0"
+  WINE_SHA256: "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701"
+jobs:
+  build-box64:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: Build Box64 for ARM64 glibc Linux
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: pinned-runtime-sources
+          path: build/runtime-sources
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: wine-11.0-wow64-x86_64-build-output
+          path: build/wine-output-pass/
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Box64 build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libcapstone-dev libepoxy-dev libx11-dev libxext-dev libxfixes-dev libxrender-dev libxrandr-dev libxi-dev libxinerama-dev libxcursor-dev libxkbcommon-dev libvulkan-dev file binutils jq
+      - name: Configure, compile, and verify ARM64 Box64
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build/box64-build logs/box64 stage/box64
+          jq -r '.box64.commit' build/runtime-sources/source-audit.json | tee logs/box64/source-commit.txt
+          test "$(jq -r '.box64.commit' build/runtime-sources/source-audit.json)" = "$BOX64_COMMIT"
+          cmake -S build/runtime-sources/box64 -B build/box64-build \
+            -DARM_DYNAREC=ON -DNOGIT=1 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+            2>&1 | tee logs/box64/configure.log
+          cmake --build build/box64-build --parallel 2 2>&1 | tee logs/box64/build.log
+          DESTDIR="$PWD/stage/box64" cmake --install build/box64-build 2>&1 | tee logs/box64/install.log
+          box64_bin="stage/box64/usr/local/bin/box64"
+          test -x "$box64_bin"
+          file "$box64_bin" | tee logs/box64/file.txt
+          readelf -h "$box64_bin" | tee logs/box64/elf-header.txt
+          grep -q 'AArch64' logs/box64/elf-header.txt
+          "$box64_bin" --version 2>&1 | tee logs/box64/version.txt
+          dpkg-query -W -f='${binary:Package}=${Version}\n' | sort > logs/box64/apt-packages.txt
+          { cmake --version; gcc --version; jq -r '.box64.commit' build/runtime-sources/source-audit.json; } > logs/box64/toolchain.txt
+          tar -cJf box64-arm64-install-tree.tar.xz -C stage/box64 usr/local
+          sha256sum box64-arm64-install-tree.tar.xz > box64-arm64-install-tree.tar.xz.sha256
+      - name: Upload Box64 build output and logs
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: box64-arm64-build-output
+          path: |
+            box64-arm64-install-tree.tar.xz
+            box64-arm64-install-tree.tar.xz.sha256
+            logs/box64/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Carry forward pinned-runtime-sources artifact
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: pinned-runtime-sources
+          path: build/runtime-sources/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Carry forward wine-11.0-wow64-x86_64-build-output artifact
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.2
+        with:
+          name: wine-11.0-wow64-x86_64-build-output
+          path: build/wine-output-pass/
+          if-no-files-found: error
+          retention-days: 7
