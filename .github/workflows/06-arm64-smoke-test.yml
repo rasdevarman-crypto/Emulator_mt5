@@ -147,6 +147,14 @@ jobs:
           # They are ephemeral lock/temp entries, not runtime payload or prefix evidence; remove them
           # before archiving so an unprivileged tar does not fail with EACCES.
           sudo find bundle/rootfs-arm64/tmp bundle/rootfs/tmp -mindepth 1 -maxdepth 1 -name '.wine-*' -exec rm -rf -- {} + 2>/dev/null || true
+          # These are CI-only artifacts created by wineboot/PE smoke tests. They are
+          # not part of the Android runtime and can add hundreds of MiB to the APK.
+          sudo rm -rf bundle/rootfs-arm64/tmp/wine-smoke-prefix bundle/rootfs-arm64/tests
+          test ! -e bundle/rootfs-arm64/tmp/wine-smoke-prefix
+          test ! -e bundle/rootfs-arm64/tests
+          # Fixtures are needed from the package artifact to run this test, but must
+          # not be carried into the promoted runtime/APK after their assertions pass.
+          rm -rf provenance/test-fixtures
           rm -f build/runtime-bundle-candidate.tar.xz build/runtime-bundle-candidate.tar.xz.sha256
           tar --numeric-owner -cf - bundle provenance | xz -T1 -0 > build/runtime-bundle-candidate.tar.xz.partial
           mv build/runtime-bundle-candidate.tar.xz.partial build/runtime-bundle-candidate.tar.xz
