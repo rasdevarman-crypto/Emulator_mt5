@@ -1,10 +1,14 @@
 name: 04 Build ARM64 Host Rootfs
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/04-arm64-rootfs.yml"
   workflow_dispatch:
     inputs:
       upstream_run_id:
-        description: Successful Box64 build run ID
-        required: true
+        description: Successful Box64 build run ID (auto-select latest on blank)
+        required: false
         type: string
 permissions:
   contents: read
@@ -23,21 +27,36 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Resolve upstream Box64 build run
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.upstream_run_id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          run_id="$REQUESTED_RUN_ID"
+          if [[ -z "$run_id" ]]; then
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow 03-box64-build.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          fi
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "No successful Box64 build run ID found: '$run_id'" >&2; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Using successful Box64 build run: $run_id"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: box64-arm64-build-output
           path: build/box64-output
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: pinned-runtime-sources
           path: build/runtime-sources-pass/
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          run-id: ${{ inputs.upstream_run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: wine-11.0-wow64-x86_64-build-output
           path: build/wine-output-pass/
@@ -61,7 +80,9 @@ jobs:
               sed -i "s/ main$/ main universe/" /etc/apt/sources.list
             fi
             apt-get update
-            apt-get install -y --no-install-recommends ca-certificates file libc-bin proot libcapstone4 libepoxy0 libx11-6 libxext6 libxfixes3 libxrender1 libxrandr2 libxi6 libxinerama1 libxcursor1 libxkbcommon0 libvulkan1 libgl1 libgcc-s1 libstdc++6
+            apt-get install -y --no-install-recommends ca-certificates file libc-bin util-linux proot libcapstone4 libepoxy0 libx11-6 libxext6 libxfixes3 libxrender1 libxrandr2 libxi6 libxinerama1 libxcursor1 libxkbcommon0 libvulkan1 libgl1 libgcc-s1 libstdc++6
+            test -x /usr/bin/lscpu
+            /usr/bin/lscpu --version
             /usr/local/bin/box64 --version
             dpkg-query -W -f="\${binary:Package}=\${Version}\\n" | sort > /rootfs-apt-packages.txt
             apt-get clean
