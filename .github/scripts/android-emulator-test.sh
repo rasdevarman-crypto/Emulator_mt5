@@ -47,6 +47,36 @@ done
 test "$booted" -eq 1 || { echo "::error::Android emulator did not finish booting"; exit 1; }
 
 adb logcat -c
+
+# Pixel Launcher can show a system ANR dialog on hosted emulators while the app
+# continues working in the background. That dialog blocks UI hierarchy checks and
+# every tap, so detect it and choose Android's "Wait" action instead of closing the app.
+dismiss_launcher_anr() {
+  ui_file="$RUNNER_TEMP/android-diagnostics/anr-ui.xml"
+  timeout 12s adb shell uiautomator dump /sdcard/anr-ui.xml >/dev/null 2>&1 || return 0
+  timeout 12s adb pull /sdcard/anr-ui.xml "$ui_file" >/dev/null 2>&1 || return 0
+  if grep -q "Pixel Launcher isn't responding" "$ui_file"; then
+    python3 - "$ui_file" <<'PY' > "$RUNNER_TEMP/android-diagnostics/anr-wait-button.txt" 2>/dev/null || true
+import re,sys,xml.etree.ElementTree as ET
+try:
+    root=ET.parse(sys.argv[1]).getroot()
+    for n in root.iter('node'):
+        if n.attrib.get('text','').strip().lower() == 'wait':
+            m=re.search(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.attrib.get('bounds',''))
+            if m:
+                x1,y1,x2,y2=map(int,m.groups()); print((x1+x2)//2,(y1+y2)//2); raise SystemExit(0)
+except Exception: pass
+raise SystemExit(1)
+PY
+    if test -s "$RUNNER_TEMP/android-diagnostics/anr-wait-button.txt"; then
+      read -r wx wy < "$RUNNER_TEMP/android-diagnostics/anr-wait-button.txt"
+      timeout 8s adb shell input tap "$wx" "$wy" || true
+      echo "Detected Pixel Launcher ANR dialog; selected Wait at $wx,$wy to preserve app session." | tee -a "$report"
+      sleep 2
+    fi
+  fi
+}
+
 adb install -r "$APK_PATH" | tee "$RUNNER_TEMP/android-diagnostics/install.txt"
 adb shell monkey -p "$PACKAGE_NAME" 1 | tee "$RUNNER_TEMP/android-diagnostics/launch.txt"
 sleep 5
@@ -62,6 +92,10 @@ failure_re='Automatic runtime setup ব্যর্থ|not verified|SHA-256 mism
 active_re='Extraction: *[0-9]+%|Download: *[0-9]+%|Runtime setup:|Runtime auto-install attempt|Verified runtime install চেষ্টা|startup preflight চলছে'
 tap_done=0
 for i in $(seq 1 90); do
+  timeout 12s adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+  timeout 12s adb pull /sdcard/window.xml "$RUNNER_TEMP/android-diagnostics/runtime-ui.xml" >/dev/null 2>&1 || true
+  dismiss_launcher_anr
+  # Refresh the hierarchy after dismissing a system dialog so the app controls become visible.
   timeout 12s adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
   timeout 12s adb pull /sdcard/window.xml "$RUNNER_TEMP/android-diagnostics/runtime-ui.xml" >/dev/null 2>&1 || true
   timeout 15s adb logcat -d -v threadtime > "$RUNNER_TEMP/android-diagnostics/runtime-logcat-poll.txt" 2>/dev/null || true
