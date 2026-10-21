@@ -194,6 +194,31 @@ jobs:
           (cd release-assets && sha256sum *.apk > SHA256SUMS.txt)
           ls -lh release-assets
 
+      - name: Validate APK ZIP, manifest, SDK, ABI and signature
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | sort | head -n1)"
+          test -s "$apk"
+          # ZIP central directory must be readable and every entry CRC must pass.
+          unzip -t "$apk"
+          # Android SDK tools must be able to parse the compiled binary manifest.
+          sdkmanager_bin="$(find "$ANDROID_HOME/build-tools" -path '*/aapt' -type f | sort | tail -n1)"
+          apksigner_bin="$(find "$ANDROID_HOME/build-tools" -path '*/apksigner' -type f | sort | tail -n1)"
+          test -x "$sdkmanager_bin" && test -x "$apksigner_bin"
+          "$sdkmanager_bin" dump badging "$apk" | tee "$RUNNER_TEMP/apk-badging.txt"
+          grep -q '^package: name=' "$RUNNER_TEMP/apk-badging.txt"
+          grep -q '^sdkVersion:' "$RUNNER_TEMP/apk-badging.txt"
+          grep -q '^targetSdkVersion:' "$RUNNER_TEMP/apk-badging.txt"
+          grep -q '^native-code:.*arm64-v8a' "$RUNNER_TEMP/apk-badging.txt"
+          grep -q '^native-code:.*x86_64' "$RUNNER_TEMP/apk-badging.txt"
+          "$apksigner_bin" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
+          grep -q 'Verified using v2 scheme' "$RUNNER_TEMP/apk-signature.txt"
+          grep -q 'Verified using v3 scheme' "$RUNNER_TEMP/apk-signature.txt" || true
+          sha256sum "$apk" | tee "$RUNNER_TEMP/apk-sha256.txt"
+          echo "APK ZIP CRC, manifest parsing, min/target SDK, ARM64/x86_64 ABI and APK signing checks passed."
+
       - name: Upload debug APK artifact
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
