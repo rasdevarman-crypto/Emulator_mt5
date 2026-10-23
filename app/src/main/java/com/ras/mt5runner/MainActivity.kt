@@ -112,8 +112,10 @@ class MainActivity : Activity() {
         root.addView(ScrollView(this).apply { addView(logsView) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
-        addLog("অ্যাপ চালু হয়েছে; নিরাপদ runtime auto-start শুরু হচ্ছে। MT5 স্বয়ংক্রিয়ভাবে চালু হবে শুধু runtime ও PRoot test সফল হলে।")
-        startSafeAutoStart()
+        addLog("অ্যাপ চালু হয়েছে। নিরাপত্তার জন্য runtime auto-start ও MT5 auto-launch বন্ধ; Windows চালু করুন চাপলে সেশন-প্রস্তুতি ম্যানুয়ালি শুরু হবে।")
+        status.text = "অবস্থা: runtime যাচাইয়ের জন্য ‘Windows চালু করুন’ চাপুন"
+        launchMt5Button.isEnabled = true
+        refreshRuntimeStatus()
     }
 
 
